@@ -52,10 +52,12 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         content.categoryIdentifier = categoryID
         content.userInfo = [
             "eventID": event.id,
+            "cwd": event.cwd,
             "tty": event.terminal.tty ?? "",
             "termProgram": event.terminal.termProgram ?? "",
             "termSessionID": event.terminal.termSessionID ?? "",
             "itermSessionID": event.terminal.itermSessionID ?? "",
+            "ghosttySurfaceID": event.terminal.ghosttySurfaceID ?? "",
             "bundleID": event.terminal.bundleID ?? ""
         ]
 
@@ -96,6 +98,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
                 termProgram: info["termProgram"] as? String,
                 termSessionID: info["termSessionID"] as? String,
                 itermSessionID: info["itermSessionID"] as? String,
+                ghosttySurfaceID: info["ghosttySurfaceID"] as? String,
                 tty: info["tty"] as? String,
                 parentPID: nil,
                 bundleID: info["bundleID"] as? String
@@ -103,7 +106,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             if let id = info["eventID"] as? String {
                 CompletionStore.shared.markRead(id)
             }
-            TerminalJumper.jump(to: terminal)
+            let cwd = info["cwd"] as? String
+            TerminalJumper.jump(to: terminal, cwd: cwd)
             completionHandler()
         }
     }

@@ -3,15 +3,25 @@ import Foundation
 
 @MainActor
 enum TerminalJumper {
-    static func jump(to terminal: TerminalInfo) {
+    /// Jump back to the originating terminal tab/session when possible.
+    /// - Parameters:
+    ///   - terminal: Captured terminal identity from the notify hook.
+    ///   - cwd: Event working directory; used as a Ghostty fallback (may be imprecise if several tabs share a cwd).
+    static func jump(to terminal: TerminalInfo, cwd: String? = nil) {
+        if isGhostty(terminal) {
+            if jumpGhostty(tty: terminal.tty, cwd: cwd) { return }
+            activateBundle("com.mitchellh.ghostty")
+            return
+        }
+
         if let iterm = terminal.itermSessionID, !iterm.isEmpty {
             if activateITerm(sessionID: iterm) { return }
         }
         if terminal.termProgram == "Apple_Terminal" || terminal.bundleID == "com.apple.Terminal" {
-            if let tty = terminal.tty, activateTerminalApp(tty: tty) { return }
+            if let tty = normalizeTTY(terminal.tty), activateTerminalApp(tty: tty) { return }
         }
-        if let tty = terminal.tty, activateITermByTTY(tty: tty) { return }
-        if let tty = terminal.tty, activateTerminalApp(tty: tty) { return }
+        if let tty = normalizeTTY(terminal.tty), activateITermByTTY(tty: tty) { return }
+        if let tty = normalizeTTY(terminal.tty), activateTerminalApp(tty: tty) { return }
 
         let bundle = terminal.bundleID
             ?? TerminalInfo.bundleID(forTermProgram: terminal.termProgram)
@@ -28,6 +38,74 @@ enum TerminalJumper {
         ] {
             if activateBundle(candidate) { return }
         }
+    }
+
+    private static func isGhostty(_ terminal: TerminalInfo) -> Bool {
+        if terminal.bundleID == "com.mitchellh.ghostty" { return true }
+        if let program = terminal.termProgram?.lowercased(), program == "ghostty" { return true }
+        return false
+    }
+
+    /// Normalize to `/dev/ttys…` / `/dev/pts/…` form Ghostty / Terminal expect.
+    static func normalizeTTY(_ tty: String?) -> String? {
+        guard var t = tty?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else {
+            return nil
+        }
+        if t == "not a tty" || t == "?" || t == "??" || t == "-" { return nil }
+        if t.hasPrefix("/dev/") { return t }
+        if t.hasPrefix("tty") || t.hasPrefix("pts/") {
+            return "/dev/" + t
+        }
+        return t
+    }
+
+    /// Ghostty ≥1.4: focus by tty. Fallback: working directory (imprecise). Final: activate app only.
+    @discardableResult
+    private static func jumpGhostty(tty: String?, cwd: String?) -> Bool {
+        if let tty = normalizeTTY(tty), activateGhosttyByTTY(tty: tty) {
+            return true
+        }
+        if let cwd, !cwd.isEmpty, activateGhosttyByCWD(cwd: cwd) {
+            NSLog("Doneko: Ghostty 无 tty，已按工作目录跳转（同目录多 tab 可能不准）: \(cwd)")
+            return true
+        }
+        return false
+    }
+
+    @discardableResult
+    private static func activateGhosttyByTTY(tty: String) -> Bool {
+        let escaped = escapeAppleScriptString(tty)
+        let script = """
+        tell application "Ghostty"
+            set matches to every terminal whose tty is "\(escaped)"
+            if (count of matches) > 0 then
+                focus item 1 of matches
+                return true
+            end if
+        end tell
+        return false
+        """
+        return runAppleScript(script, context: "Ghostty tty=\(tty)")
+    }
+
+    @discardableResult
+    private static func activateGhosttyByCWD(cwd: String) -> Bool {
+        let escaped = escapeAppleScriptString(cwd)
+        // Prefer exact working directory; Ghostty may omit trailing slash.
+        let script = """
+        tell application "Ghostty"
+            set matches to every terminal whose working directory is "\(escaped)"
+            if (count of matches) = 0 then
+                set matches to every terminal whose working directory contains "\(escaped)"
+            end if
+            if (count of matches) > 0 then
+                focus item 1 of matches
+                return true
+            end if
+        end tell
+        return false
+        """
+        return runAppleScript(script, context: "Ghostty cwd=\(cwd)")
     }
 
     @discardableResult
@@ -47,9 +125,7 @@ enum TerminalJumper {
 
     @discardableResult
     private static func activateTerminalApp(tty: String) -> Bool {
-        let escaped = tty
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        let escaped = escapeAppleScriptString(tty)
         let script = """
         tell application "Terminal"
             activate
@@ -68,15 +144,29 @@ enum TerminalJumper {
         end tell
         return false
         """
-        return runAppleScript(script)
+        return runAppleScript(script, context: "Terminal.app tty")
+    }
+
+    /// ITERM_SESSION_ID is often `w0t0p0:UUID`. Prefer the UUID after the colon for `unique id`.
+    @discardableResult
+    private static func activateITerm(sessionID: String) -> Bool {
+        let uuidPart: String = {
+            if let idx = sessionID.firstIndex(of: ":") {
+                let after = String(sessionID[sessionID.index(after: idx)...])
+                if !after.isEmpty { return after }
+            }
+            return sessionID
+        }()
+        let candidates = Array(Set([uuidPart, sessionID])).filter { !$0.isEmpty }
+        for candidate in candidates {
+            if activateITermMatching(candidate) { return true }
+        }
+        return false
     }
 
     @discardableResult
-    private static func activateITerm(sessionID: String) -> Bool {
-        let escaped = sessionID
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        // iTerm2 session id format varies; try matching id property.
+    private static func activateITermMatching(_ sessionID: String) -> Bool {
+        let escaped = escapeAppleScriptString(sessionID)
         let script = """
         tell application "iTerm"
             activate
@@ -106,14 +196,12 @@ enum TerminalJumper {
         end tell
         return false
         """
-        return runAppleScript(script)
+        return runAppleScript(script, context: "iTerm session")
     }
 
     @discardableResult
     private static func activateITermByTTY(tty: String) -> Bool {
-        let escaped = tty
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        let escaped = escapeAppleScriptString(tty)
         let script = """
         tell application "iTerm"
             activate
@@ -135,28 +223,36 @@ enum TerminalJumper {
         end tell
         return false
         """
-        return runAppleScript(script)
+        return runAppleScript(script, context: "iTerm tty")
     }
 
-    private static func runAppleScript(_ source: String) -> Bool {
+    private static func escapeAppleScriptString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    @discardableResult
+    private static func runAppleScript(_ source: String, context: String = "") -> Bool {
         var error: NSDictionary?
-        if let script = NSAppleScript(source: source) {
-            let result = script.executeAndReturnError(&error)
-            if let error {
-                let code = error[NSAppleScript.errorNumber] as? Int ?? 0
-                // -1743 = not authorized (Automation permission)
-                if code == -1743 {
-                    NSLog("Doneko: 需要「自动化」权限才能跳回终端，请在 系统设置 → 隐私与安全性 → 自动化 中允许 Doneko。")
-                } else {
-                    NSLog("Doneko: AppleScript 错误: \(error)")
-                }
-                return false
-            }
-            if result.booleanValue { return true }
-            // Some scripts return string "true"
-            if result.stringValue == "true" { return true }
-            return result.booleanValue
+        guard let script = NSAppleScript(source: source) else {
+            NSLog("Doneko: 无法创建 AppleScript\(context.isEmpty ? "" : " (\(context))")")
+            return false
         }
+        let result = script.executeAndReturnError(&error)
+        if let error {
+            let code = error[NSAppleScript.errorNumber] as? Int ?? 0
+            let message = error[NSAppleScript.errorMessage] as? String ?? "\(error)"
+            // -1743 = not authorized (Automation permission)
+            if code == -1743 {
+                NSLog("Doneko: 需要「自动化」权限才能跳回终端（\(context)）。请在 系统设置 → 隐私与安全性 → 自动化 中允许 Doneko 控制 Ghostty / Terminal / iTerm，然后重试。未假装跳转成功。")
+            } else {
+                NSLog("Doneko: AppleScript 失败\(context.isEmpty ? "" : " (\(context))" ): [\(code)] \(message)")
+            }
+            return false
+        }
+        if result.booleanValue { return true }
+        if result.stringValue == "true" { return true }
         return false
     }
 
@@ -168,7 +264,6 @@ enum TerminalJumper {
         let expected = terminal.bundleID
             ?? TerminalInfo.bundleID(forTermProgram: terminal.termProgram)
         if let expected, front == expected { return true }
-        // Heuristic: any known terminal is frontmost and we have no better match.
         let terminals: Set<String> = [
             "com.apple.Terminal",
             "com.googlecode.iterm2",

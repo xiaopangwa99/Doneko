@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                let id = components.queryItems?.first(where: { $0.name == "id" })?.value,
                let event = CompletionStore.shared.completions.first(where: { $0.id == id }) {
                 CompletionStore.shared.markRead(id)
-                TerminalJumper.jump(to: event.terminal)
+                TerminalJumper.jump(to: event.terminal, cwd: event.cwd)
             }
         }
     }

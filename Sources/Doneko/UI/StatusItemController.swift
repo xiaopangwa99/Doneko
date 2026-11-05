@@ -141,7 +141,7 @@ final class StatusItemController: NSObject {
         guard let id = sender.representedObject as? String,
               let event = CompletionStore.shared.completions.first(where: { $0.id == id }) else { return }
         CompletionStore.shared.markRead(id)
-        TerminalJumper.jump(to: event.terminal)
+        TerminalJumper.jump(to: event.terminal, cwd: event.cwd)
         refresh()
     }
 

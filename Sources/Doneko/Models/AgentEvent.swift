@@ -60,6 +60,8 @@ struct TerminalInfo: Codable, Equatable {
     var termProgram: String?
     var termSessionID: String?
     var itermSessionID: String?
+    /// Ghostty ≥1.4 surface id from `GHOSTTY_SURFACE_ID` (optional; tty focus is primary).
+    var ghosttySurfaceID: String?
     var tty: String?
     var parentPID: Int?
     var bundleID: String?
@@ -74,6 +76,7 @@ struct TerminalInfo: Codable, Equatable {
             termProgram: termProgram,
             termSessionID: env["TERM_SESSION_ID"],
             itermSessionID: env["ITERM_SESSION_ID"],
+            ghosttySurfaceID: env["GHOSTTY_SURFACE_ID"],
             tty: ttyOverride ?? env["DONEKO_TTY"] ?? Self.guessTTY(),
             parentPID: parentPIDOverride ?? Int(env["DONEKO_PPID"] ?? "") ?? Int(getppid()),
             bundleID: Self.bundleID(forTermProgram: termProgram)

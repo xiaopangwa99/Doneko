@@ -62,7 +62,7 @@ final class EventRouter {
         if settings.enableCapsule {
             capsule.show(event: event, duration: settings.capsuleDuration) {
                 CompletionStore.shared.markRead(event.id)
-                TerminalJumper.jump(to: event.terminal)
+                TerminalJumper.jump(to: event.terminal, cwd: event.cwd)
             }
         }
         if settings.enableEdgeGlow {
@@ -84,6 +84,7 @@ final class EventRouter {
                 termProgram: ProcessInfo.processInfo.environment["TERM_PROGRAM"],
                 termSessionID: nil,
                 itermSessionID: nil,
+                ghosttySurfaceID: ProcessInfo.processInfo.environment["GHOSTTY_SURFACE_ID"],
                 tty: nil,
                 parentPID: nil,
                 bundleID: nil
@@ -112,13 +113,16 @@ final class EventRouter {
         let preview = AgentEvent.truncate((obj["preview"] as? String) ?? "")
         let session = obj["session_id"] as? String ?? obj["sessionID"] as? String
         let termProgram = obj["term_program"] as? String
+        let nested = obj["terminal"] as? [String: Any]
         let term = TerminalInfo(
-            termProgram: termProgram,
-            termSessionID: obj["term_session_id"] as? String,
-            itermSessionID: obj["iterm_session_id"] as? String,
-            tty: obj["tty"] as? String,
-            parentPID: obj["ppid"] as? Int,
-            bundleID: TerminalInfo.bundleID(forTermProgram: termProgram)
+            termProgram: termProgram ?? nested?["termProgram"] as? String,
+            termSessionID: obj["term_session_id"] as? String ?? nested?["termSessionID"] as? String,
+            itermSessionID: obj["iterm_session_id"] as? String ?? nested?["itermSessionID"] as? String,
+            ghosttySurfaceID: nested?["ghosttySurfaceID"] as? String ?? obj["ghostty_surface_id"] as? String,
+            tty: obj["tty"] as? String ?? nested?["tty"] as? String,
+            parentPID: obj["ppid"] as? Int ?? nested?["parentPID"] as? Int,
+            bundleID: TerminalInfo.bundleID(forTermProgram: termProgram ?? nested?["termProgram"] as? String)
+                ?? nested?["bundleID"] as? String
         )
         return AgentEvent(
             id: (obj["id"] as? String) ?? UUID().uuidString,
