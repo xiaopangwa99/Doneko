@@ -5,13 +5,24 @@ import Combine
 final class CompletionStore: ObservableObject {
     static let shared = CompletionStore()
 
+    /// Interrupted Claude turns may never send Stop. Drop a working session
+    /// after this long with no further event for that session.
+    static let workingStateTimeout: TimeInterval = 15 * 60
+
     @Published private(set) var completions: [AgentEvent] = []
     @Published private(set) var workingSessions: [String: AgentEvent] = [:]
 
     var unreadCount: Int { completions.filter(\.unread).count }
     var isWorking: Bool { !workingSessions.isEmpty }
 
+    /// Persisted history. Applied both when recording and when loading from disk.
     private let maxItems = 30
+    /// Backstop so a burst of distinct session ids cannot grow without limit.
+    private let maxWorkingSessions = 32
+    private var workingTimeouts: [String: Task<Void, Never>] = [:]
+    /// Only active sessions. A global counter avoids reusing a generation after cancel.
+    private var timeoutGeneration: [String: Int] = [:]
+    private var nextTimeoutGeneration = 0
     private let persistURL: URL
 
     private init() {
@@ -25,11 +36,13 @@ final class CompletionStore: ObservableObject {
     func handle(_ event: AgentEvent) {
         switch event.kind {
         case .started:
-            let key = event.sessionID ?? event.id
+            let key = sessionKey(for: event)
             workingSessions[key] = event
+            scheduleWorkingTimeout(for: key)
+            trimWorkingSessionsIfNeeded()
         case .completed, .needsAttention:
-            let key = event.sessionID ?? event.id
-            workingSessions.removeValue(forKey: key)
+            // Matching session leaves the working set, which stops the menu-bar animation.
+            endWorking(for: event)
             var stored = event
             stored.unread = true
             completions.insert(stored, at: 0)
@@ -58,12 +71,87 @@ final class CompletionStore: ObservableObject {
         save()
     }
 
+    private func sessionKey(for event: AgentEvent) -> String {
+        if let session = event.sessionID, !session.isEmpty {
+            return session
+        }
+        return event.id
+    }
+
+    /// Stop the working flag for this event. A completion without a session id
+    /// cannot be paired (each event has its own id), so every working session
+    /// from the same source is cleared — otherwise the icon would pulse until timeout.
+    private func endWorking(for event: AgentEvent) {
+        if let session = event.sessionID, !session.isEmpty {
+            endWorkingSession(session)
+            return
+        }
+        var keys: [String] = []
+        for (key, value) in workingSessions where value.source == event.source {
+            keys.append(key)
+        }
+        for key in keys {
+            endWorkingSession(key)
+        }
+    }
+
+    private func endWorkingSession(_ key: String) {
+        cancelWorkingTimeout(for: key)
+        guard workingSessions[key] != nil else { return }
+        workingSessions.removeValue(forKey: key)
+    }
+
+    private func scheduleWorkingTimeout(for key: String) {
+        nextTimeoutGeneration += 1
+        let generation = nextTimeoutGeneration
+        timeoutGeneration[key] = generation
+        workingTimeouts[key]?.cancel()
+        let nanos = UInt64(Self.workingStateTimeout * 1_000_000_000)
+        workingTimeouts[key] = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: nanos)
+            guard !Task.isCancelled else { return }
+            self?.expireWorkingSession(key, generation: generation)
+        }
+    }
+
+    private func cancelWorkingTimeout(for key: String) {
+        timeoutGeneration.removeValue(forKey: key)
+        workingTimeouts[key]?.cancel()
+        workingTimeouts.removeValue(forKey: key)
+    }
+
+    private func expireWorkingSession(_ key: String, generation: Int) {
+        guard timeoutGeneration[key] == generation else { return }
+        timeoutGeneration.removeValue(forKey: key)
+        workingTimeouts.removeValue(forKey: key)
+        workingSessions.removeValue(forKey: key)
+    }
+
+    private func trimWorkingSessionsIfNeeded() {
+        guard workingSessions.count > maxWorkingSessions else { return }
+        let overflow = workingSessions.count - maxWorkingSessions
+        let oldest = workingSessions
+            .sorted { $0.value.timestamp < $1.value.timestamp }
+            .prefix(overflow)
+            .map(\.key)
+        for key in oldest {
+            endWorkingSession(key)
+        }
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: persistURL) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        if let items = try? decoder.decode([AgentEvent].self, from: data) {
-            completions = items.map { var e = $0; e.unread = false; return e }
+        guard let items = try? decoder.decode([AgentEvent].self, from: data) else { return }
+        let trimmed = items.count > maxItems
+        completions = items.prefix(maxItems).map { item in
+            var event = item
+            event.unread = false
+            return event
+        }
+        if trimmed {
+            save()
         }
     }
 

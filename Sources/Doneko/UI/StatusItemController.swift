@@ -4,20 +4,35 @@ import Combine
 
 @MainActor
 final class StatusItemController: NSObject {
+    /// ~3 Hz. A status item only accepts an NSImage, so SF Symbol effects cannot
+    /// drive it; eight cached frames stand in for the old 12.5 Hz redraw.
+    private static let animationInterval: TimeInterval = 1.0 / 3.0
+    private static let animationTolerance: TimeInterval = 0.1
+    private static let animationFrameCount = 8
+
+    private struct IconKey: Hashable {
+        var unread: Bool
+        var working: Bool
+        var frame: Int
+        var appearance: String
+    }
+
     private var statusItem: NSStatusItem?
     private var animationTimer: Timer?
-    private var pulsePhase: CGFloat = 0
+    private var animationGeneration = 0
+    private var frameIndex = 0
+    private var iconCache: [IconKey: NSImage] = [:]
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
 
     func setup() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = item
         if let button = item.button {
-            button.image = Self.baseImage(unread: false, working: false, phase: 0)
+            button.image = icon(unread: false, working: false)
             button.imagePosition = .imageOnly
             button.toolTip = "Doneko — agent 完成提醒"
         }
-        statusItem = item
         rebuildMenu()
 
         CompletionStore.shared.$completions
@@ -38,14 +53,16 @@ final class StatusItemController: NSObject {
 
     private func refresh() {
         let store = CompletionStore.shared
+        // isWorking drops on completed/needsAttention and on workingStateTimeout.
         let working = store.isWorking && AppSettings.shared.enableMenuBarAnimation
         let unread = store.unreadCount > 0
 
         if working {
-            startAnimation()
+            startAnimationIfNeeded()
+            statusItem?.button?.image = icon(unread: unread, working: true)
         } else {
             stopAnimation()
-            statusItem?.button?.image = Self.baseImage(unread: unread, working: false, phase: 0)
+            statusItem?.button?.image = icon(unread: unread, working: false)
         }
 
         if let button = statusItem?.button {
@@ -56,28 +73,49 @@ final class StatusItemController: NSObject {
         rebuildMenu()
     }
 
-    private func startAnimation() {
+    private func startAnimationIfNeeded() {
         guard animationTimer == nil else { return }
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+        frameIndex = 0
+        prewarmWorkingFrames()
+        let generation = animationGeneration
+        let timer = Timer(timeInterval: Self.animationInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self else { return }
-                self.pulsePhase += 0.18
-                let unread = CompletionStore.shared.unreadCount > 0
-                self.statusItem?.button?.image = Self.baseImage(
-                    unread: unread,
-                    working: true,
-                    phase: self.pulsePhase
-                )
+                guard let self, self.animationGeneration == generation else { return }
+                self.tickAnimation()
             }
         }
+        timer.tolerance = Self.animationTolerance
         RunLoop.main.add(timer, forMode: .common)
         animationTimer = timer
     }
 
     private func stopAnimation() {
+        guard animationTimer != nil else { return }
+        // Bump first so a tick already queued cannot paint a working frame afterwards.
+        animationGeneration += 1
         animationTimer?.invalidate()
         animationTimer = nil
-        pulsePhase = 0
+        frameIndex = 0
+    }
+
+    private func tickAnimation() {
+        let store = CompletionStore.shared
+        guard store.isWorking, AppSettings.shared.enableMenuBarAnimation else {
+            stopAnimation()
+            statusItem?.button?.image = icon(unread: store.unreadCount > 0, working: false)
+            return
+        }
+        frameIndex = (frameIndex + 1) % Self.animationFrameCount
+        statusItem?.button?.image = icon(unread: store.unreadCount > 0, working: true)
+    }
+
+    private func prewarmWorkingFrames() {
+        let appearance = appearanceKey()
+        for unread in [false, true] {
+            for frame in 0..<Self.animationFrameCount {
+                _ = cachedIcon(unread: unread, working: true, frame: frame, appearance: appearance)
+            }
+        }
     }
 
     private func rebuildMenu() {
@@ -182,7 +220,39 @@ final class StatusItemController: NSObject {
         return formatter.string(from: date)
     }
 
-    private static func baseImage(unread: Bool, working: Bool, phase: CGFloat) -> NSImage {
-        CatIcon.menuBarImage(unread: unread, working: working, phase: phase)
+    private func icon(unread: Bool, working: Bool) -> NSImage {
+        let frame = working ? frameIndex : 0
+        return cachedIcon(
+            unread: unread,
+            working: working,
+            frame: frame,
+            appearance: appearanceKey()
+        )
+    }
+
+    private func cachedIcon(unread: Bool, working: Bool, frame: Int, appearance: String) -> NSImage {
+        let key = IconKey(unread: unread, working: working, frame: frame, appearance: appearance)
+        if let cached = iconCache[key] {
+            return cached
+        }
+        if iconCache.count > 64 {
+            iconCache.removeAll(keepingCapacity: true)
+        }
+        let phase = working ? pulsePhase(for: frame) : 0
+        let image = CatIcon.menuBarImage(unread: unread, working: working, phase: phase)
+        iconCache[key] = image
+        return image
+    }
+
+    private func pulsePhase(for frame: Int) -> CGFloat {
+        CGFloat(frame) / CGFloat(Self.animationFrameCount) * (2 * CGFloat.pi)
+    }
+
+    private func appearanceKey() -> String {
+        let appearance = statusItem?.button?.effectiveAppearance ?? NSApp.effectiveAppearance
+        if let match = appearance.bestMatch(from: [.aqua, .darkAqua]) {
+            return match.rawValue
+        }
+        return appearance.name.rawValue
     }
 }

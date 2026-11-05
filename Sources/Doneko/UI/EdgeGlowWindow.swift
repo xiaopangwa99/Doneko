@@ -1,32 +1,57 @@
 import AppKit
 import QuartzCore
 
+/// Full-screen edge glow shown only for the duration of a flash.
+/// Windows are created on demand and closed afterwards — nothing stays ordered in,
+/// and the fade is removed so a hidden window is not left animating.
 @MainActor
 final class EdgeGlowController {
     private var windows: [NSWindow] = []
+    private var dismissWork: DispatchWorkItem?
+    private var generation = 0
 
     func flash(source: AgentSource, duration: CFTimeInterval = 1.5) {
-        clear()
+        generation += 1
+        let token = generation
+        releaseWindows()
+
         let rgb = source.glowRGB
         let color = NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 0.85)
 
         for screen in NSScreen.screens {
             let win = makeWindow(for: screen, color: color)
             windows.append(win)
+            win.contentView?.layoutSubtreeIfNeeded()
+            // Alpha is 0 until the fade starts, so ordering front does not flash.
             win.orderFrontRegardless()
-            animate(window: win, duration: duration)
+            animate(window: win, duration: duration, token: token)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { [weak self] in
-            self?.clear()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.generation == token else { return }
+            self.releaseWindows()
         }
+        dismissWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1, execute: work)
     }
 
-    private func clear() {
-        for w in windows {
-            w.orderOut(nil)
-        }
+    private func releaseWindows() {
+        dismissWork?.cancel()
+        dismissWork = nil
+        // Drop windows before stopping the fade so a completion handler cannot
+        // start the second half on a window that is being closed.
+        let existing = windows
         windows.removeAll()
+        for win in existing {
+            win.contentView?.layer?.removeAllAnimations()
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = 0
+            win.animator().alphaValue = 0
+            NSAnimationContext.endGrouping()
+            win.orderOut(nil)
+            win.contentView = nil
+            win.close()
+        }
     }
 
     private func makeWindow(for screen: NSScreen, color: NSColor) -> NSWindow {
@@ -35,9 +60,11 @@ final class EdgeGlowController {
             contentRect: frame,
             styleMask: [.borderless],
             backing: .buffered,
-            defer: false,
+            defer: true,
             screen: screen
         )
+        // ARC owns the window via `windows` until releaseWindows() drops it.
+        win.isReleasedWhenClosed = false
         win.isOpaque = false
         win.backgroundColor = .clear
         win.hasShadow = false
@@ -52,11 +79,14 @@ final class EdgeGlowController {
         return win
     }
 
-    private func animate(window: NSWindow, duration: CFTimeInterval) {
+    private func animate(window: NSWindow, duration: CFTimeInterval, token: Int) {
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = duration * 0.35
             window.animator().alphaValue = 1
-        }, completionHandler: {
+        }, completionHandler: { [weak self, weak window] in
+            guard let self, let window else { return }
+            guard self.generation == token else { return }
+            guard self.windows.contains(where: { $0 === window }) else { return }
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = duration * 0.65
                 window.animator().alphaValue = 0
@@ -68,6 +98,7 @@ final class EdgeGlowController {
 private final class GlowView: NSView {
     let glowColor: NSColor
     private let borderWidth: CGFloat = 28
+    private var lastLayoutSize: CGSize = .zero
 
     init(frame: NSRect, glowColor: NSColor) {
         self.glowColor = glowColor
@@ -81,6 +112,9 @@ private final class GlowView: NSView {
 
     override func layout() {
         super.layout()
+        guard bounds.width > 1, bounds.height > 1 else { return }
+        guard bounds.size != lastLayoutSize else { return }
+        lastLayoutSize = bounds.size
         rebuildLayers()
     }
 
