@@ -47,6 +47,19 @@ cp "${RELEASE_BIN}" "${APP_DIR}/Contents/MacOS/${APP_NAME}"
 chmod +x "${APP_DIR}/Contents/MacOS/${APP_NAME}"
 cp "${ROOT}/Resources/Info.plist" "${APP_DIR}/Contents/Info.plist"
 
+ICONSET="${ROOT}/Resources/AppIcon.iconset"
+ICNS="${ROOT}/Resources/AppIcon.icns"
+echo "==> 安装 App 图标…"
+if [[ -d "${ICONSET}" ]] && command -v iconutil >/dev/null 2>&1; then
+  iconutil -c icns "${ICONSET}" -o "${APP_DIR}/Contents/Resources/AppIcon.icns" \
+    || cp "${ICNS}" "${APP_DIR}/Contents/Resources/AppIcon.icns"
+elif [[ -f "${ICNS}" ]]; then
+  cp "${ICNS}" "${APP_DIR}/Contents/Resources/AppIcon.icns"
+fi
+if [[ ! -f "${APP_DIR}/Contents/Resources/AppIcon.icns" ]]; then
+  echo "警告: 未找到 AppIcon.iconset / AppIcon.icns，Finder 会显示占位图标。" >&2
+fi
+
 # Minimal PkgInfo
 echo -n 'APPL????' > "${APP_DIR}/Contents/PkgInfo"
 
@@ -265,6 +278,8 @@ print("     可将示例合并到 ~/.codex/hooks.json 并在 Codex 中 /hooks �
 PY
 
 echo "==> 启动 Doneko…"
+# Finder caches the icon until the bundle mtime changes.
+touch "${APP_DIR}"
 open "${APP_DIR}" || true
 
 echo ""
@@ -277,7 +292,7 @@ echo ""
 echo "首次使用提示:"
 echo "  1. 系统会请求「通知」权限 — 请允许"
 echo "  2. 点击通知跳转终端时，会请求「自动化」权限（Terminal / iTerm）— 请允许"
-echo "  3. 菜单栏小猫图标 → 设置… 可开关各项效果，并点「测试」预览"
+echo "  3. 菜单栏爪印 → 设置… 可开关各项效果，并点「测试」预览"
 echo "  4. Claude Code: 新开一轮对话，提问后等待回答结束即可收到提示"
 echo "  5. Codex: 完成一轮 turn 后触发 notify"
 echo ""

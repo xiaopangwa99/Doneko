@@ -3,9 +3,8 @@ import SwiftUI
 import Combine
 
 @MainActor
-final class StatusItemController: NSObject {
-    /// ~3 Hz. A status item only accepts an NSImage, so SF Symbol effects cannot
-    /// drive it; eight cached frames stand in for the old 12.5 Hz redraw.
+final class StatusItemController: NSObject, NSMenuDelegate {
+    /// ~3 Hz bounce. Eight cached paw frames; a status item only accepts an NSImage.
     private static let animationInterval: TimeInterval = 1.0 / 3.0
     private static let animationTolerance: TimeInterval = 0.1
     private static let animationFrameCount = 8
@@ -22,6 +21,9 @@ final class StatusItemController: NSObject {
     private var animationGeneration = 0
     private var frameIndex = 0
     private var iconCache: [IconKey: NSImage] = [:]
+    /// Orange paw until the menu is opened or every item is read.
+    private var iconAcknowledged = true
+    private var seenUnreadCount = 0
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
 
@@ -55,7 +57,7 @@ final class StatusItemController: NSObject {
         let store = CompletionStore.shared
         // isWorking drops on completed/needsAttention and on workingStateTimeout.
         let working = store.isWorking && AppSettings.shared.enableMenuBarAnimation
-        let unread = store.unreadCount > 0
+        let unread = iconShowsUnread()
 
         if working {
             startAnimationIfNeeded()
@@ -68,7 +70,7 @@ final class StatusItemController: NSObject {
         if let button = statusItem?.button {
             button.toolTip = working
                 ? "Agent 工作中…"
-                : (unread ? "有 \(store.unreadCount) 条未读回答 🐱" : "Doneko — 空闲")
+                : (store.unreadCount > 0 ? "有 \(store.unreadCount) 条未读" : "Doneko — 空闲")
         }
         rebuildMenu()
     }
@@ -102,11 +104,31 @@ final class StatusItemController: NSObject {
         let store = CompletionStore.shared
         guard store.isWorking, AppSettings.shared.enableMenuBarAnimation else {
             stopAnimation()
-            statusItem?.button?.image = icon(unread: store.unreadCount > 0, working: false)
+            statusItem?.button?.image = icon(unread: iconShowsUnread(), working: false)
             return
         }
         frameIndex = (frameIndex + 1) % Self.animationFrameCount
-        statusItem?.button?.image = icon(unread: store.unreadCount > 0, working: true)
+        statusItem?.button?.image = icon(unread: iconShowsUnread(), working: true)
+    }
+
+    /// Whole paw turns orange while something is unread. Opening the menu, or
+    /// reading the last item, puts the template paw back.
+    private func iconShowsUnread() -> Bool {
+        let count = CompletionStore.shared.unreadCount
+        if count > seenUnreadCount {
+            iconAcknowledged = false
+        } else if count == 0 {
+            iconAcknowledged = true
+        }
+        seenUnreadCount = count
+        return count > 0 && !iconAcknowledged
+    }
+
+    private func acknowledgeUnreadIcon() {
+        guard !iconAcknowledged else { return }
+        iconAcknowledged = true
+        let working = CompletionStore.shared.isWorking && AppSettings.shared.enableMenuBarAnimation
+        statusItem?.button?.image = icon(unread: false, working: working)
     }
 
     private func prewarmWorkingFrames() {
@@ -172,7 +194,12 @@ final class StatusItemController: NSObject {
         quit.target = self
         menu.addItem(quit)
 
+        menu.delegate = self
         self.statusItem?.menu = menu
+    }
+
+    @objc func menuWillOpen(_ menu: NSMenu) {
+        acknowledgeUnreadIcon()
     }
 
     @objc private func openCompletion(_ sender: NSMenuItem) {
@@ -239,7 +266,7 @@ final class StatusItemController: NSObject {
             iconCache.removeAll(keepingCapacity: true)
         }
         let phase = working ? pulsePhase(for: frame) : 0
-        let image = CatIcon.menuBarImage(unread: unread, working: working, phase: phase)
+        let image = PawIcon.menuBarImage(unread: unread, working: working, phase: phase)
         iconCache[key] = image
         return image
     }

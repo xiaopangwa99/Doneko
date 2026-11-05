@@ -146,9 +146,9 @@ private struct CapsuleView: View {
                 Circle()
                     .fill(accent.opacity(0.25))
                     .frame(width: 36, height: 36)
-                Image(systemName: iconName)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(accent)
+                PawShape()
+                    .fill(accent)
+                    .frame(width: 22, height: 22)
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -184,10 +184,6 @@ private struct CapsuleView: View {
         case .needsAttention: return event.source.needsAttentionTitle
         case .started: return event.source.workingTitle
         }
-    }
-
-    private var iconName: String {
-        CatIcon.capsuleSymbolName(for: event.kind)
     }
 
     private var accent: Color {

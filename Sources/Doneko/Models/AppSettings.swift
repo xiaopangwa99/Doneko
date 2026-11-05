@@ -33,7 +33,7 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    /// System sounds from /System/Library/Sounds. Default soft "Purr" fits the cat theme.
+    /// System sounds from /System/Library/Sounds. Default soft "Purr" fits the paw theme.
     /// A synthesized "meow" is not bundled (no copyrighted assets); use Purr/Glass instead.
     static let systemSounds: [String] = [
         "Purr", "Glass", "Ping", "Pop", "Bottle", "Funk", "Hero", "Sosumi", "Submarine", "Tink"

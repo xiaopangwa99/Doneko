@@ -25,7 +25,7 @@ struct SettingsView: View {
                 .disabled(!settings.enableCapsule)
 
                 Toggle("屏幕边缘柔光", isOn: $settings.enableEdgeGlow)
-                Toggle("菜单栏小猫动画", isOn: $settings.enableMenuBarAnimation)
+                Toggle("菜单栏爪印动画", isOn: $settings.enableMenuBarAnimation)
             }
 
             Section("行为") {
