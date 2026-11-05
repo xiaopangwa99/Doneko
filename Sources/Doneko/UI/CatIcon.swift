@@ -51,6 +51,9 @@ enum CatIcon {
             return true
         }
         image.isTemplate = !unread
+        // Callers keep these images and swap them in. Always-cache so the drawing
+        // handler does not run again on every status-item repaint.
+        image.cacheMode = .always
         return image
     }
 
