@@ -1,20 +1,20 @@
 # Doneko
 
-> **done** + **neko**（日语「猫」）— macOS 菜单栏小猫，在 Claude Code / Codex CLI 回答结束后轻轻提醒你。
+> **done** + **neko**（日语「猫」）— macOS 菜单栏爪印，在 Claude Code / Codex CLI 回答结束后轻轻提醒你。
 
 - 事件驱动，无轮询；平时几乎不占 CPU
 - 原生 Swift / SwiftUI / AppKit（非 Electron）
 - 要求 macOS 13+
-- UI 为简体中文；菜单栏是一只小猫 🐱
+- UI 为简体中文；菜单栏是一枚猫爪印
 
 ## 功能
 
 | 效果 | 说明 | 默认 |
 | --- | --- | --- |
 | 系统通知 | 横幅 + 系统提示音（默认柔和的 **Purr**），点击跳回终端 | 开 |
-| 顶部胶囊 | 灵动岛式提示，带小猫图标，可点 | 开 |
+| 顶部胶囊 | 灵动岛式提示，带爪印，可点 | 开 |
 | 边缘柔光 | 全屏点击穿透的彩色光晕（Claude 偏橙 / Codex 偏蓝） | 开 |
-| 菜单栏小猫 | 空闲猫；工作中轻微脉冲/耳朵动画；未读橙点 | 开 |
+| 菜单栏爪印 | 空闲为单色模板爪印；工作中轻微跳动；未读时整枚爪印变为橙色（打开菜单或读完后恢复） | 开 |
 | 前台不打扰 | 来源终端已在前台则不弹提醒 | 开 |
 | 登录启动 | 通过 `SMAppService` 注册 | 关 |
 
@@ -40,7 +40,7 @@ cd /path/to/Doneko
 脚本会：
 
 1. `swift build -c release`
-2. 组装 `~/Applications/Doneko.app`（`LSUIElement`，无 Dock 图标）并 ad-hoc 签名
+2. 组装 `~/Applications/Doneko.app`（`LSUIElement`，无 Dock 图标；Finder 图标为橙色圆角爪印）并 ad-hoc 签名
 3. 安装 `~/.doneko/bin/doneko-notify`
 4. 安全合并 hooks 到 `~/.claude/settings.json`（先备份；同时清掉旧版 AgentPing hooks）
 5. 写入 `notify` 到 `~/.codex/config.toml`（若已有非 Doneko 的 notify，**不会覆盖**，只打印警告）
@@ -50,7 +50,7 @@ cd /path/to/Doneko
 
 ### 应用内测试
 
-菜单栏小猫 → **设置…** → **测试 Claude Code / 测试 Codex**
+菜单栏爪印 → **设置…** → **测试 Claude Code / 测试 Codex**
 
 ### 手动打脚本
 
@@ -64,7 +64,7 @@ echo '{"session_id":"t1","cwd":"/tmp/demo","hook_event_name":"Stop","last_assist
 
 ### 真实 Agent
 
-1. 确认菜单栏有小猫图标
+1. 确认菜单栏有爪印
 2. Claude Code：提问并等待回答结束
 3. Codex：完成一轮 turn
 
@@ -90,12 +90,12 @@ Claude Code hooks / Codex notify
         └─ osascript 通知（兜底）
         │
         ▼
-   Doneko.app（菜单栏小猫）
+   Doneko.app（菜单栏爪印）
 ```
 
 ### Claude Code
 
-- `UserPromptSubmit` → `started`（小猫进入工作中动画）
+- `UserPromptSubmit` → `started`（爪印进入工作中动画）
 - `Stop` → `completed`
 - `Notification` → `needsAttention`
 
@@ -121,7 +121,7 @@ JSON 作为**最后一个 argv**（stdin 为 null）。`notify` 目前只有 `ag
 
 | 现象 | 排查 |
 | --- | --- |
-| 完全没反应 | 确认菜单栏有小猫；看 `~/.doneko/logs/notify.log` |
+| 完全没反应 | 确认菜单栏有爪印；看 `~/.doneko/logs/notify.log` |
 | 只有通知、没有胶囊 | 设置是否关闭了胶囊；是否「前台不打扰」 |
 | Claude 不触发 | `/hooks` 是否有 Doneko；检查 `~/.claude/settings.json` |
 | Codex 不触发 | `notify` 须在用户 `~/.codex/config.toml` **顶层** |
@@ -138,6 +138,9 @@ ls -l ~/Library/Application\ Support/Doneko/doneko.sock
 ```bash
 swift build -c release
 # 产物一般在 .build/release/Doneko
+
+# 重新生成 App 图标（需要 Pillow）。install.sh 会在 Mac 上用 iconutil 打成 icns。
+python3 Scripts/render-app-icon.py
 ```
 
 Bundle ID：`com.yiming.doneko` · URL Scheme：`doneko://` · MIT License
