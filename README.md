@@ -18,7 +18,13 @@
 | 前台不打扰 | 来源终端已在前台则不弹提醒 | 开 |
 | 登录启动 | 通过 `SMAppService` 注册 | 关 |
 
-菜单栏可查看最近完成记录；点击一条即可跳回 Terminal.app / iTerm2（按 tty / session id），或其它终端（按 `TERM_PROGRAM` 激活）。
+菜单栏可查看最近完成记录；点击一条即可跳回对应终端：
+
+- **Ghostty**（推荐 ≥ **1.4.0**）：按 tty 精确定位到具体 terminal / tab；无 tty 时回退到工作目录匹配（同目录多 tab 可能不准）
+- **Terminal.app / iTerm2**：按 tty / session id（iTerm 会解析 `ITERM_SESSION_ID` 冒号后的 UUID）
+- 其它终端：按 `TERM_PROGRAM` 激活整个应用
+
+Ghostty AppleScript 支持自 **1.3.0** 起；按 tty 聚焦需要 **≥ 1.4.0**。首次跳转需在「系统设置 → 隐私与安全性 → 自动化」允许 Doneko 控制 Ghostty。
 
 > 未内置独立「喵叫」音频文件（避免版权素材）；请使用系统音效 **Purr** / **Glass** 等。
 
@@ -106,8 +112,10 @@ JSON 作为**最后一个 argv**（stdin 为 null）。`notify` 目前只有 `ag
 ## 权限提示（首次）
 
 1. **通知** → 允许  
-2. **自动化**（跳回 Terminal / iTerm）→ 允许  
+2. **自动化**（跳回 Terminal / iTerm / **Ghostty**）→ 允许 Doneko 控制对应终端  
 3. Gatekeeper：右键 App → 打开  
+
+> Ghostty：请升级到 **≥ 1.4** 以获得按 tty 精跳；1.3 仅有 AppleScript / 工作目录匹配。若提示自动化权限被拒，Doneko 不会假装跳转成功。
 
 ## 故障排查
 
@@ -117,7 +125,9 @@ JSON 作为**最后一个 argv**（stdin 为 null）。`notify` 目前只有 `ag
 | 只有通知、没有胶囊 | 设置是否关闭了胶囊；是否「前台不打扰」 |
 | Claude 不触发 | `/hooks` 是否有 Doneko；检查 `~/.claude/settings.json` |
 | Codex 不触发 | `notify` 须在用户 `~/.codex/config.toml` **顶层** |
-| 跳转失败 | 隐私与安全性 → 自动化 → 勾选 Doneko |
+| 跳转失败 | 隐私与安全性 → 自动化 → 勾选 Doneko（含 Ghostty） |
+| Ghostty 只激活窗口、不切 tab | 升级到 Ghostty ≥ 1.4；确认 hook 采集到了 tty（看事件 JSON / notify 日志） |
+| 同目录多个 Ghostty tab 跳错 | 正常：无 tty 时只能按 cwd 猜；修好 tty 采集后按 tty 精跳 |
 
 ```bash
 ls -l ~/Library/Application\ Support/Doneko/doneko.sock

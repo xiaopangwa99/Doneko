@@ -11,11 +11,37 @@ mkdir -p "${LOG_DIR}" 2>/dev/null || true
 TERM_PROGRAM_VAL="${TERM_PROGRAM:-}"
 TERM_SESSION_ID_VAL="${TERM_SESSION_ID:-}"
 ITERM_SESSION_ID_VAL="${ITERM_SESSION_ID:-}"
+GHOSTTY_SURFACE_ID_VAL="${GHOSTTY_SURFACE_ID:-}"
 PPID_VAL="${PPID:-}"
-TTY_VAL="$(tty 2>/dev/null || true)"
-if [[ -z "${TTY_VAL}" || "${TTY_VAL}" == "not a tty" ]]; then
-  TTY_VAL=""
-fi
+
+# Prefer our own tty; if hooks run without a controlling tty, walk up PPID.
+resolve_tty() {
+  local raw pid i tty_field
+  raw="$(tty 2>/dev/null || true)"
+  if [[ -n "${raw}" && "${raw}" != "not a tty" ]]; then
+    printf '%s\n' "${raw}"
+    return 0
+  fi
+  pid="${PPID:-}"
+  i=0
+  while [[ -n "${pid}" && "${pid}" =~ ^[0-9]+$ && "${pid}" -gt 1 && "${i}" -lt 8 ]]; do
+    tty_field="$(ps -o tty= -p "${pid}" 2>/dev/null | awk '{print $1}' || true)"
+    if [[ -n "${tty_field}" && "${tty_field}" != "?" && "${tty_field}" != "??" && "${tty_field}" != "-" ]]; then
+      if [[ "${tty_field}" == /* ]]; then
+        printf '%s\n' "${tty_field}"
+      else
+        printf '/dev/%s\n' "${tty_field}"
+      fi
+      return 0
+    fi
+    pid="$(ps -o ppid= -p "${pid}" 2>/dev/null | awk '{print $1}' || true)"
+    i=$((i + 1))
+  done
+  return 0
+}
+
+TTY_VAL="$(resolve_tty || true)"
+TTY_VAL="$(printf '%s' "${TTY_VAL}" | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
 CWD="$(pwd -P 2>/dev/null || pwd)"
 EXPLICIT_SOURCE=""
@@ -56,11 +82,12 @@ export DK_CWD_FALLBACK="${CWD}"
 export DK_TERM_PROGRAM="${TERM_PROGRAM_VAL}"
 export DK_TERM_SESSION_ID="${TERM_SESSION_ID_VAL}"
 export DK_ITERM_SESSION_ID="${ITERM_SESSION_ID_VAL}"
+export DK_GHOSTTY_SURFACE_ID="${GHOSTTY_SURFACE_ID_VAL}"
 export DK_TTY="${TTY_VAL}"
 export DK_PPID="${PPID_VAL}"
 
 EVENT_JSON="$(/usr/bin/python3 - <<'PY' || true
-import json, os, uuid, datetime, sys
+import json, os, uuid, datetime, sys, re
 
 raw = os.environ.get("DK_PAYLOAD") or ""
 source = os.environ.get("DK_SOURCE") or "unknown"
@@ -111,6 +138,18 @@ def truncate(s, n=120):
     s = " ".join((s or "").split())
     return s if len(s) <= n else s[:n] + "…"
 
+def normalize_tty(t):
+    if not t:
+        return None
+    t = str(t).strip()
+    if not t or t in ("not a tty", "?", "??", "-"):
+        return None
+    if t.startswith("/dev/"):
+        return t
+    if re.match(r"^ttys?\d+$", t) or re.match(r"^pts/\d+$", t):
+        return "/dev/" + t
+    return t
+
 project = os.path.basename(cwd.rstrip("/")) or "项目"
 ppid = None
 try:
@@ -129,6 +168,9 @@ mapping = {
     "cursor": "com.todesktop.230313mzl4w4u92",
 }
 bundle = mapping.get(term_program) if term_program else None
+ghostty_surface = os.environ.get("DK_GHOSTTY_SURFACE_ID") or None
+if ghostty_surface == "":
+    ghostty_surface = None
 
 event = {
     "id": str(uuid.uuid4()),
@@ -143,7 +185,8 @@ event = {
         "termProgram": term_program,
         "termSessionID": os.environ.get("DK_TERM_SESSION_ID") or None,
         "itermSessionID": os.environ.get("DK_ITERM_SESSION_ID") or None,
-        "tty": os.environ.get("DK_TTY") or None,
+        "ghosttySurfaceID": ghostty_surface,
+        "tty": normalize_tty(os.environ.get("DK_TTY") or None),
         "parentPID": ppid,
         "bundleID": bundle,
     },
