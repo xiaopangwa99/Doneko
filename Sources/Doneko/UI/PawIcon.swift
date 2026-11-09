@@ -142,6 +142,8 @@ struct PawShape: Shape {
             }
             path.closeSubpath()
         }
-        return path
+        /// PawIcon geometry is y-up (AppKit); SwiftUI is y-down, so flip vertically.
+        let flip = CGAffineTransform(translationX: 0, y: rect.minY + rect.maxY).scaledBy(x: 1, y: -1)
+        return path.applying(flip)
     }
 }
