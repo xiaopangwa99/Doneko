@@ -161,121 +161,93 @@ os.replace(tmp, path)
 print("    Claude hooks 已写入: UserPromptSubmit / Stop / Notification")
 PY
 
-# ---------- Codex config.toml ----------
+# ---------- Codex hooks.json merge ----------
+# Codex's single `notify` slot is often taken (e.g. by Computer Use), so Doneko
+# uses lifecycle hooks instead. Other tools' hooks in the same file are kept.
 CODEX_DIR="${HOME}/.codex"
+CODEX_HOOKS="${CODEX_DIR}/hooks.json"
 CODEX_CFG="${CODEX_DIR}/config.toml"
 mkdir -p "${CODEX_DIR}"
 
-echo "==> 配置 Codex notify → ${CODEX_CFG}"
-if [[ -f "${CODEX_CFG}" ]]; then
-  cp "${CODEX_CFG}" "${CODEX_CFG}.doneko.bak.$(date +%Y%m%d%H%M%S)"
-  echo "    已备份现有 config.toml"
+echo "==> 合并 Codex hooks → ${CODEX_HOOKS}"
+if [[ -f "${CODEX_HOOKS}" ]]; then
+  cp "${CODEX_HOOKS}" "${CODEX_HOOKS}.doneko.bak.$(date +%Y%m%d%H%M%S)"
+  echo "    已备份现有 hooks.json"
 fi
 
-/usr/bin/python3 - "${CODEX_CFG}" "${NOTIFY_DST}" <<'PY'
-import os, sys, re
+/usr/bin/python3 - "${CODEX_HOOKS}" "${NOTIFY_DST}" <<'PY'
+import json, os, shlex, sys
 
 path, notify = sys.argv[1], sys.argv[2]
-text = ""
+data = {}
 if os.path.isfile(path):
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
-
-# Detect existing top-level notify =
-# Simple scan: lines before any [table] that look like notify =
-lines = text.splitlines()
-before_table = []
-rest = []
-hit_table = False
-for line in lines:
-    if not hit_table and re.match(r"^\s*\[", line):
-        hit_table = True
-    if hit_table:
-        rest.append(line)
-    else:
-        before_table.append(line)
-
-notify_re = re.compile(r"^\s*notify\s*=", re.I)
-existing = [ln for ln in before_table if notify_re.match(ln)]
-ours_line = f'notify = ["{notify}", "--source=codex", "--kind=completed"]'
-
-if existing:
-    joined = "\n".join(existing)
-    if "doneko-notify" in joined or "agentping-notify" in joined:
-        # Replace previous Doneko / legacy AgentPing line(s)
-        before_table = [ln for ln in before_table if not (
-            notify_re.match(ln) and ("doneko-notify" in ln or "agentping-notify" in ln)
-        )]
-        # If other notify remains, warn; else write ours
-        still = [ln for ln in before_table if notify_re.match(ln)]
-        if still:
-            print("警告: ~/.codex/config.toml 仍有其他 notify，已移除旧 Doneko/AgentPing 行但未写入新行。")
-            for ln in still:
-                print(f"        {ln}")
-        else:
-            before_table.append(ours_line)
-            print("    已更新现有 Doneko/AgentPing notify 行")
-    else:
-        print("警告: ~/.codex/config.toml 已有 notify 配置，未覆盖。")
-        print("      现有内容:")
-        for ln in existing:
-            print(f"        {ln}")
-        print(f"      如需使用 Doneko，请手动改为:\n        {ours_line}")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        print("警告: ~/.codex/hooks.json 不是合法 JSON，未修改。")
         sys.exit(0)
-else:
-    # Insert near top, after any comments
-    insert_at = 0
-    for i, ln in enumerate(before_table):
-        if ln.strip() and not ln.strip().startswith("#"):
-            insert_at = i
-            break
-        insert_at = i + 1
-    before_table.insert(insert_at, ours_line)
-    before_table.insert(insert_at + 1, "")
-    print("    已写入 notify 配置")
+if not isinstance(data, dict):
+    data = {}
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    hooks = {}
+    data["hooks"] = hooks
 
-# Optional: also hint about Codex lifecycle hooks for "started"
-hooks_path = os.path.join(os.path.dirname(path), "hooks.json")
-# We don't auto-write hooks.json (requires /hooks trust). Document in README.
+MARKERS = ("doneko-notify", "agentping-notify")
 
-new_text = "\n".join(before_table + rest)
-if not new_text.endswith("\n"):
-    new_text += "\n"
+def is_ours(h):
+    return isinstance(h, dict) and any(m in (h.get("command") or "") for m in MARKERS)
+
+def ensure_event(event_name, kind):
+    groups = hooks.get(event_name)
+    if not isinstance(groups, list):
+        groups = []
+    new_groups = []
+    for g in groups:
+        if not isinstance(g, dict):
+            new_groups.append(g)
+            continue
+        handlers = g.get("hooks") or []
+        kept = [h for h in handlers if not is_ours(h)]
+        if kept or not handlers:
+            ng = dict(g)
+            ng["hooks"] = kept
+            new_groups.append(ng)
+    new_groups.append({
+        "hooks": [{
+            "type": "command",
+            "command": f"{shlex.quote(notify)} --source=codex --kind={kind}",
+        }]
+    })
+    hooks[event_name] = new_groups
+
+ensure_event("UserPromptSubmit", "started")
+ensure_event("Stop", "completed")
+ensure_event("PermissionRequest", "needsAttention")
+
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
-    f.write(new_text)
-os.replace(tmp, path)
-PY
-
-# Optional Codex started hook helper file (not auto-enabled — needs trust)
-CODEX_HOOKS_EXAMPLE="${HOME}/.doneko/codex-hooks.example.json"
-/usr/bin/python3 - "${CODEX_HOOKS_EXAMPLE}" "${NOTIFY_DST}" <<'PY'
-import json, sys
-path, notify = sys.argv[1], sys.argv[2]
-data = {
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": notify,
-            "args": ["--source=codex", "--kind=started"],
-            "timeout": 5,
-            "statusMessage": "Doneko"
-          }
-        ]
-      }
-    ]
-  }
-}
-with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
     f.write("\n")
-print(f"    已生成 Codex 开始事件示例: {path}")
-print("    （Codex notify 仅有 agent-turn-complete；如需菜单栏「工作中」动画，")
-print("     可将示例合并到 ~/.codex/hooks.json 并在 Codex 中 /hooks 信任）")
+os.replace(tmp, path)
+print("    Codex hooks 已写入: UserPromptSubmit / Stop / PermissionRequest")
 PY
+
+# Older Doneko versions used Codex `notify`; drop only that line to avoid double alerts.
+if [[ -f "${CODEX_CFG}" ]] && grep -Eq '^\s*notify\s*=.*(doneko-notify|agentping-notify)' "${CODEX_CFG}"; then
+  cp "${CODEX_CFG}" "${CODEX_CFG}.doneko.bak.$(date +%Y%m%d%H%M%S)"
+  /usr/bin/python3 - "${CODEX_CFG}" <<'PY'
+import re, sys
+path = sys.argv[1]
+lines = open(path, encoding="utf-8").read().splitlines()
+pat = re.compile(r"^\s*notify\s*=.*(doneko-notify|agentping-notify)")
+out = [ln for ln in lines if not pat.match(ln)]
+open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
+print("    已移除旧版 Doneko 的 Codex notify 行（其他 notify 保留）")
+PY
+fi
+rm -f "${HOME}/.doneko/codex-hooks.example.json" 2>/dev/null || true
 
 echo "==> 启动 Doneko…"
 # Finder caches the icon until the bundle mtime changes.
@@ -294,6 +266,6 @@ echo "  1. 系统会请求「通知」权限 — 请允许"
 echo "  2. 点击通知跳转终端时，会请求「自动化」权限（Terminal / iTerm）— 请允许"
 echo "  3. 菜单栏爪印 → 设置… 可开关各项效果，并点「测试」预览"
 echo "  4. Claude Code: 新开一轮对话，提问后等待回答结束即可收到提示"
-echo "  5. Codex: 完成一轮 turn 后触发 notify"
+echo "  5. Codex: 新开一个会话即可；如 Codex 提示有新 hook 待信任，用 /hooks 允许 Doneko"
 echo ""
 echo "卸载: ${ROOT}/uninstall.sh"

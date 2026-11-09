@@ -174,6 +174,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 item.target = self
                 item.representedObject = event.id
                 item.toolTip = event.preview
+                item.attributedTitle = Self.menuTitle(head: title, summary: event.preview)
                 menu.addItem(item)
             }
         }
@@ -238,6 +239,31 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func quit() {
         SocketServer.shared.stop()
         NSApp.terminate(nil)
+    }
+
+    private static func menuTitle(head: String, summary: String) -> NSAttributedString {
+        let text = NSMutableAttributedString(
+            string: head,
+            attributes: [.font: NSFont.menuFont(ofSize: 0)]
+        )
+        let cleaned = summary
+            .replacingOccurrences(of: "[*`#>]+", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return text }
+        let limit = 36
+        let short = cleaned.count > limit ? String(cleaned.prefix(limit)) + "…" : cleaned
+        let style = NSMutableParagraphStyle()
+        style.firstLineHeadIndent = 0
+        text.append(NSAttributedString(
+            string: "\n    " + short,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style
+            ]
+        ))
+        return text
     }
 
     private static func timeString(_ date: Date) -> String {

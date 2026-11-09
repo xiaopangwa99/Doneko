@@ -87,6 +87,51 @@ else:
 PY
 fi
 
+CODEX_HOOKS="${HOME}/.codex/hooks.json"
+if [[ -f "${CODEX_HOOKS}" ]]; then
+  cp "${CODEX_HOOKS}" "${CODEX_HOOKS}.doneko.uninstall.bak.$(date +%Y%m%d%H%M%S)"
+  /usr/bin/python3 - "${CODEX_HOOKS}" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+hooks = data.get("hooks") if isinstance(data, dict) else None
+if not isinstance(hooks, dict):
+    sys.exit(0)
+MARKERS = ("doneko-notify", "agentping-notify")
+changed = False
+for event, groups in list(hooks.items()):
+    if not isinstance(groups, list):
+        continue
+    new_groups = []
+    for g in groups:
+        if not isinstance(g, dict):
+            new_groups.append(g)
+            continue
+        handlers = g.get("hooks") or []
+        kept = [h for h in handlers if not (isinstance(h, dict) and any(m in (h.get("command") or "") for m in MARKERS))]
+        if len(kept) != len(handlers):
+            changed = True
+        if kept:
+            ng = dict(g)
+            ng["hooks"] = kept
+            new_groups.append(ng)
+    if new_groups:
+        hooks[event] = new_groups
+    else:
+        del hooks[event]
+if changed:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print("    已从 ~/.codex/hooks.json 移除 Doneko hooks（其他工具的保留）")
+else:
+    print("    Codex hooks.json 中无 Doneko hooks")
+PY
+fi
+
 CODEX_CFG="${HOME}/.codex/config.toml"
 if [[ -f "${CODEX_CFG}" ]]; then
   cp "${CODEX_CFG}" "${CODEX_CFG}.doneko.uninstall.bak.$(date +%Y%m%d%H%M%S)"

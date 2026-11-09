@@ -39,7 +39,7 @@ final class EventRouter {
     }
 
     func process(_ event: AgentEvent) {
-        CompletionStore.shared.handle(event)
+        guard CompletionStore.shared.handle(event) else { return }
 
         switch event.kind {
         case .started:
