@@ -85,9 +85,21 @@ final class CompletionStore: ObservableObject {
         save()
     }
 
-    func clear() {
+    func remove(id: String) {
+        let before = completions.count
+        completions.removeAll { $0.id == id }
+        guard completions.count != before else { return }
+        save()
+    }
+
+    func removeAll() {
+        guard !completions.isEmpty else { return }
         completions = []
         save()
+    }
+
+    func clear() {
+        removeAll()
     }
 
     private func sessionKey(for event: AgentEvent) -> String {

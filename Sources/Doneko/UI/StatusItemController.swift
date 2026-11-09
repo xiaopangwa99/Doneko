@@ -157,10 +157,31 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(statusItem)
         menu.addItem(.separator())
 
+        let working = store.workingSessions.sorted { $0.value.timestamp > $1.value.timestamp }
+        for (key, event) in working {
+            let time = Self.timeString(event.timestamp)
+            let title = "⏳ 工作中 · \(event.source.displayName) · \(event.projectName) · \(time)"
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(openWorkingSession(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = key
+            item.toolTip = event.preview
+            item.attributedTitle = Self.menuTitle(head: title, summary: event.preview)
+            menu.addItem(item)
+        }
+        if !working.isEmpty && !store.completions.isEmpty {
+            menu.addItem(.separator())
+        }
+
         if store.completions.isEmpty {
-            let empty = NSMenuItem(title: "暂无最近完成记录", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
+            if working.isEmpty {
+                let empty = NSMenuItem(title: "暂无最近完成记录", action: nil, keyEquivalent: "")
+                empty.isEnabled = false
+                menu.addItem(empty)
+            }
         } else {
             for event in store.completions.prefix(12) {
                 let time = Self.timeString(event.timestamp)
@@ -174,8 +195,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 item.target = self
                 item.representedObject = event.id
                 item.toolTip = event.preview
+                item.keyEquivalentModifierMask = []
                 item.attributedTitle = Self.menuTitle(head: title, summary: event.preview)
                 menu.addItem(item)
+
+                // Hold ⌥ to swap this row into a delete action (NSMenu alternate).
+                let deleteItem = NSMenuItem(
+                    title: "删除：\(title)",
+                    action: #selector(deleteCompletion(_:)),
+                    keyEquivalent: ""
+                )
+                deleteItem.target = self
+                deleteItem.representedObject = event.id
+                deleteItem.isAlternate = true
+                deleteItem.keyEquivalentModifierMask = .option
+                deleteItem.attributedTitle = Self.deleteMenuTitle(head: title)
+                menu.addItem(deleteItem)
             }
         }
 
@@ -185,6 +220,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         markAll.target = self
         markAll.isEnabled = store.unreadCount > 0
         menu.addItem(markAll)
+
+        let clearAll = NSMenuItem(title: "清空记录", action: #selector(clearAllCompletions), keyEquivalent: "")
+        clearAll.target = self
+        clearAll.isEnabled = !store.completions.isEmpty
+        clearAll.toolTip = "删除全部完成记录（需确认）"
+        menu.addItem(clearAll)
 
         let settings = NSMenuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
@@ -211,8 +252,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refresh()
     }
 
+    @objc private func openWorkingSession(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String,
+              let event = CompletionStore.shared.workingSessions[key] else { return }
+        TerminalJumper.jump(to: event.terminal, cwd: event.cwd)
+    }
+
     @objc private func markAllRead() {
         CompletionStore.shared.markAllRead()
+        refresh()
+    }
+
+    @objc private func deleteCompletion(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        CompletionStore.shared.remove(id: id)
+        refresh()
+    }
+
+    @objc private func clearAllCompletions() {
+        guard !CompletionStore.shared.completions.isEmpty else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "清空全部记录？"
+        alert.informativeText = "将删除菜单里的完成历史，进行中的会话不受影响。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "清空")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        CompletionStore.shared.removeAll()
         refresh()
     }
 
@@ -261,6 +328,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .paragraphStyle: style
+            ]
+        ))
+        return text
+    }
+
+    private static func deleteMenuTitle(head: String) -> NSAttributedString {
+        let text = NSMutableAttributedString(
+            string: "删除：",
+            attributes: [
+                .font: NSFont.menuFont(ofSize: 0),
+                .foregroundColor: NSColor.systemRed
+            ]
+        )
+        text.append(NSAttributedString(
+            string: head,
+            attributes: [
+                .font: NSFont.menuFont(ofSize: 0),
+                .foregroundColor: NSColor.secondaryLabelColor
             ]
         ))
         return text
