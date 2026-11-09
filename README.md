@@ -18,7 +18,7 @@
 | 前台不打扰 | 来源终端已在前台则不弹提醒 | 开 |
 | 登录启动 | 通过 `SMAppService` 注册 | 关 |
 
-菜单栏可查看最近完成记录；点击一条即可跳回对应终端：
+菜单栏历史每个会话只保留最新一条，灰色第二行是回复摘要；点击一条即可跳回对应终端：
 
 - **Ghostty**（推荐 ≥ **1.4.0**）：按 tty 精确定位到具体 terminal / tab；无 tty 时回退到工作目录匹配（同目录多 tab 可能不准）
 - **Terminal.app / iTerm2**：按 tty / session id（iTerm 会解析 `ITERM_SESSION_ID` 冒号后的 UUID）
@@ -43,7 +43,7 @@ cd /path/to/Doneko
 2. 组装 `~/Applications/Doneko.app`（`LSUIElement`，无 Dock 图标；Finder 图标为橙色圆角爪印）并 ad-hoc 签名
 3. 安装 `~/.doneko/bin/doneko-notify`
 4. 安全合并 hooks 到 `~/.claude/settings.json`（先备份；同时清掉旧版 AgentPing hooks）
-5. 写入 `notify` 到 `~/.codex/config.toml`（若已有非 Doneko 的 notify，**不会覆盖**，只打印警告）
+5. 把 Doneko 的 handlers 合并进 `~/.codex/hooks.json`（`UserPromptSubmit` / `Stop` / `PermissionRequest`；其它工具的 hooks 会保留）。已有的 `notify` **保持不动**（只会删掉旧版 Doneko 自己写过的那一行，避免和 hooks 重复提醒）。首次需在 Codex 里用 `/hooks` 信任这些 hook
 6. 启动应用
 
 ## 如何测试
@@ -66,7 +66,7 @@ echo '{"session_id":"t1","cwd":"/tmp/demo","hook_event_name":"Stop","last_assist
 
 1. 确认菜单栏有爪印
 2. Claude Code：提问并等待回答结束
-3. Codex：完成一轮 turn
+3. Codex：提问后爪印进入工作中，回答结束或请求权限时提醒（需已用 `/hooks` 信任）
 
 ## 卸载
 
@@ -74,12 +74,12 @@ echo '{"session_id":"t1","cwd":"/tmp/demo","hook_event_name":"Stop","last_assist
 ./uninstall.sh
 ```
 
-会删除 App、notify 脚本，并从 Claude / Codex 配置中移除 **Doneko 与旧版 AgentPing** 写入的条目。
+会删除 App、notify 脚本，并从 Claude settings 与 Codex `hooks.json` 中移除 **Doneko 与旧版 AgentPing** 写入的条目（`config.toml` 里旧版 Doneko 的 `notify` 行也会删掉，其它 `notify` 保留）。
 
 ## 架构说明
 
 ```
-Claude Code hooks / Codex notify
+Claude Code hooks / Codex hooks
         │
         ▼
  ~/.doneko/bin/doneko-notify   （立刻后台投递后 exit 0）
@@ -103,11 +103,50 @@ stdin 为 Claude 官方 JSON。若 `stop_hook_active == true` 则静默退出。
 
 ### Codex CLI
 
-```toml
-notify = ["/Users/你/.doneko/bin/doneko-notify", "--source=codex", "--kind=completed"]
+安装写入的是 `~/.codex/hooks.json`，不再占用 `config.toml` 里那一个 `notify` 槽。现在有开始事件，菜单栏「工作中」动画会跟着走。Codex 会要求你用 `/hooks` **信任一次** 这些新 hook。
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.doneko/bin/doneko-notify --source=codex --kind=started"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.doneko/bin/doneko-notify --source=codex --kind=completed"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.doneko/bin/doneko-notify --source=codex --kind=needsAttention"
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
-JSON 作为**最后一个 argv**（stdin 为 null）。`notify` 目前只有 `agent-turn-complete`，没有官方「开始」事件。可选参考 `~/.doneko/codex-hooks.example.json`。
+- `UserPromptSubmit` → `started`（爪印进入工作中动画）
+- `Stop` → `completed`
+- `PermissionRequest` → `needsAttention`
+
+事件 JSON 由 Codex 经 stdin 传入。
 
 ## 权限提示（首次）
 
@@ -124,7 +163,7 @@ JSON 作为**最后一个 argv**（stdin 为 null）。`notify` 目前只有 `ag
 | 完全没反应 | 确认菜单栏有爪印；看 `~/.doneko/logs/notify.log` |
 | 只有通知、没有胶囊 | 设置是否关闭了胶囊；是否「前台不打扰」 |
 | Claude 不触发 | `/hooks` 是否有 Doneko；检查 `~/.claude/settings.json` |
-| Codex 不触发 | `notify` 须在用户 `~/.codex/config.toml` **顶层** |
+| Codex 不触发 | 确认 `~/.codex/config.toml` 里 `[features] hooks = true`；在 Codex 中用 `/hooks` 信任 Doneko |
 | 跳转失败 | 隐私与安全性 → 自动化 → 勾选 Doneko（含 Ghostty） |
 | Ghostty 只激活窗口、不切 tab | 升级到 Ghostty ≥ 1.4；确认 hook 采集到了 tty（看事件 JSON / notify 日志） |
 | 同目录多个 Ghostty tab 跳错 | 正常：无 tty 时只能按 cwd 猜；修好 tty 采集后按 tty 精跳 |

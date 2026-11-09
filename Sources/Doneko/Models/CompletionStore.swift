@@ -33,24 +33,43 @@ final class CompletionStore: ObservableObject {
         load()
     }
 
-    func handle(_ event: AgentEvent) {
+    /// Returns false when the event is a redundant reminder and should not alert.
+    @discardableResult
+    func handle(_ event: AgentEvent) -> Bool {
         switch event.kind {
         case .started:
             let key = sessionKey(for: event)
             workingSessions[key] = event
             scheduleWorkingTimeout(for: key)
             trimWorkingSessionsIfNeeded()
+            return true
         case .completed, .needsAttention:
+            // Claude's 60s idle reminder repeats a turn we already reported.
+            if Self.isIdleReminder(event),
+               let session = event.sessionID, !session.isEmpty,
+               completions.contains(where: { $0.sessionID == session }) {
+                return false
+            }
             // Matching session leaves the working set, which stops the menu-bar animation.
             endWorking(for: event)
             var stored = event
             stored.unread = true
+            if let session = event.sessionID, !session.isEmpty {
+                // One row per session: keep only the newest.
+                completions.removeAll { $0.sessionID == session }
+            }
             completions.insert(stored, at: 0)
             if completions.count > maxItems {
                 completions = Array(completions.prefix(maxItems))
             }
             save()
+            return true
         }
+    }
+
+    static func isIdleReminder(_ event: AgentEvent) -> Bool {
+        event.kind == .needsAttention
+            && event.preview.localizedCaseInsensitiveContains("waiting for your input")
     }
 
     func markRead(_ id: String) {
@@ -144,8 +163,14 @@ final class CompletionStore: ObservableObject {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let items = try? decoder.decode([AgentEvent].self, from: data) else { return }
-        let trimmed = items.count > maxItems
-        completions = items.prefix(maxItems).map { item in
+        var seen = Set<String>()
+        let deduped = items.filter { item in
+            if Self.isIdleReminder(item) { return false }
+            guard let session = item.sessionID, !session.isEmpty else { return true }
+            return seen.insert(session).inserted
+        }
+        let trimmed = deduped.count != items.count || deduped.count > maxItems
+        completions = deduped.prefix(maxItems).map { item in
             var event = item
             event.unread = false
             return event

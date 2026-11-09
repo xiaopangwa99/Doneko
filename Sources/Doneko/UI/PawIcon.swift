@@ -11,27 +11,27 @@ enum PawIcon {
         var height: CGFloat
     }
 
-    /// Unit box, y up. Toes are tall ovals; the main pad is a smooth bean.
+    /// Unit box, y up. Chubby round toes and a big bean pad that fill the box.
     static let toes: [Toe] = [
-        Toe(cx: 0.40, cy: 0.705, width: 0.145, height: 0.210),
-        Toe(cx: 0.60, cy: 0.705, width: 0.145, height: 0.210),
-        Toe(cx: 0.23, cy: 0.545, width: 0.130, height: 0.175),
-        Toe(cx: 0.77, cy: 0.545, width: 0.130, height: 0.175)
+        Toe(cx: 0.36, cy: 0.800, width: 0.220, height: 0.270),
+        Toe(cx: 0.64, cy: 0.800, width: 0.220, height: 0.270),
+        Toe(cx: 0.12, cy: 0.600, width: 0.200, height: 0.240),
+        Toe(cx: 0.88, cy: 0.600, width: 0.200, height: 0.240)
     ]
 
     static let pad: [CGPoint] = [
-        CGPoint(x: 0.500, y: 0.500),
-        CGPoint(x: 0.620, y: 0.485),
-        CGPoint(x: 0.720, y: 0.425),
-        CGPoint(x: 0.765, y: 0.345),
-        CGPoint(x: 0.700, y: 0.255),
-        CGPoint(x: 0.580, y: 0.215),
-        CGPoint(x: 0.500, y: 0.205),
-        CGPoint(x: 0.420, y: 0.215),
-        CGPoint(x: 0.300, y: 0.255),
-        CGPoint(x: 0.235, y: 0.345),
-        CGPoint(x: 0.280, y: 0.425),
-        CGPoint(x: 0.380, y: 0.485)
+        CGPoint(x: 0.500, y: 0.600),
+        CGPoint(x: 0.630, y: 0.585),
+        CGPoint(x: 0.740, y: 0.510),
+        CGPoint(x: 0.800, y: 0.380),
+        CGPoint(x: 0.780, y: 0.200),
+        CGPoint(x: 0.660, y: 0.080),
+        CGPoint(x: 0.500, y: 0.050),
+        CGPoint(x: 0.340, y: 0.080),
+        CGPoint(x: 0.220, y: 0.200),
+        CGPoint(x: 0.200, y: 0.380),
+        CGPoint(x: 0.260, y: 0.510),
+        CGPoint(x: 0.370, y: 0.585)
     ]
 
     static func menuBarImage(unread: Bool, working: Bool, phase: CGFloat) -> NSImage {
@@ -51,7 +51,7 @@ enum PawIcon {
                 ? NSColor.systemOrange.withAlphaComponent(alpha)
                 : NSColor.black.withAlphaComponent(alpha)
             color.setFill()
-            let rect = NSRect(x: 1.5, y: 1.2 + bounce, width: 15, height: 15)
+            let rect = NSRect(x: 1, y: 1 + bounce, width: 16, height: 16)
             bezier(in: rect).fill()
             return true
         }
