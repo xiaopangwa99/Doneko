@@ -173,7 +173,6 @@ private struct CapsuleView: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(accent.opacity(0.35), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         )
         .padding(2)
     }
