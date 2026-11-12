@@ -249,6 +249,106 @@ PY
 fi
 rm -f "${HOME}/.doneko/codex-hooks.example.json" 2>/dev/null || true
 
+# ---------- Antigravity hooks.json merge ----------
+# Global hooks live at ~/.gemini/config/hooks.json (CLI / App / IDE).
+# PreInvocation / Stop use a flat handler list (no matcher wrapper).
+AGY_BIN=""
+if command -v agy >/dev/null 2>&1; then
+  AGY_BIN="$(command -v agy)"
+elif [[ -x "${HOME}/.local/bin/agy" ]]; then
+  AGY_BIN="${HOME}/.local/bin/agy"
+fi
+if [[ -d "${HOME}/.gemini" || -n "${AGY_BIN}" ]]; then
+  GEMINI_DIR="${HOME}/.gemini/config"
+  GEMINI_HOOKS="${GEMINI_DIR}/hooks.json"
+  mkdir -p "${GEMINI_DIR}"
+  echo "==> 合并 Antigravity hooks → ${GEMINI_HOOKS}"
+  if [[ -f "${GEMINI_HOOKS}" ]]; then
+    cp "${GEMINI_HOOKS}" "${GEMINI_HOOKS}.doneko.bak.$(date +%Y%m%d%H%M%S)"
+    echo "    已备份现有 hooks.json"
+  fi
+  /usr/bin/python3 - "${GEMINI_HOOKS}" "${NOTIFY_DST}" <<'PY'
+import json, os, shlex, sys
+
+path, notify = sys.argv[1], sys.argv[2]
+data = {}
+if os.path.isfile(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        print("警告: ~/.gemini/config/hooks.json 不是合法 JSON，未修改。")
+        sys.exit(0)
+if not isinstance(data, dict):
+    data = {}
+
+MARKERS = ("doneko-notify", "agentping-notify")
+
+def handler_is_ours(h):
+    return isinstance(h, dict) and any(m in (h.get("command") or "") for m in MARKERS)
+
+def strip_ours(items):
+    if not isinstance(items, list):
+        return items, False
+    changed = False
+    out = []
+    for item in items:
+        if handler_is_ours(item):
+            changed = True
+            continue
+        if isinstance(item, dict) and isinstance(item.get("hooks"), list):
+            kept = [h for h in item["hooks"] if not handler_is_ours(h)]
+            if len(kept) != len(item["hooks"]):
+                changed = True
+            if kept:
+                ng = dict(item)
+                ng["hooks"] = kept
+                out.append(ng)
+        else:
+            out.append(item)
+    return out, changed
+
+for key, val in list(data.items()):
+    if key == "doneko" or not isinstance(val, dict):
+        continue
+    new_def = dict(val)
+    hook_changed = False
+    for ev, items in list(new_def.items()):
+        if ev == "enabled":
+            continue
+        cleaned, ch = strip_ours(items)
+        if ch:
+            hook_changed = True
+            if cleaned:
+                new_def[ev] = cleaned
+            else:
+                del new_def[ev]
+    if hook_changed:
+        data[key] = new_def
+
+cmd = shlex.quote(notify)
+data["doneko"] = {
+    "enabled": True,
+    "PreInvocation": [
+        {"type": "command", "command": f"{cmd} --source=antigravity --kind=started", "timeout": 10}
+    ],
+    "Stop": [
+        {"type": "command", "command": f"{cmd} --source=antigravity --kind=completed", "timeout": 10}
+    ],
+}
+
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+os.replace(tmp, path)
+print("    Antigravity hooks 已写入: PreInvocation / Stop")
+print("    在 agy 里输入 /hooks 可查看；如提示待信任，允许 Doneko")
+PY
+else
+  echo "==> 未检测到 Antigravity / ~/.gemini，跳过 hooks"
+fi
+
 echo "==> 启动 Doneko…"
 # Finder caches the icon until the bundle mtime changes.
 touch "${APP_DIR}"
@@ -267,5 +367,6 @@ echo "  2. 点击通知跳转终端时，会请求「自动化」权限（Termin
 echo "  3. 菜单栏爪印 → 设置… 可开关各项效果，并点「测试」预览"
 echo "  4. Claude Code: 新开一轮对话，提问后等待回答结束即可收到提示"
 echo "  5. Codex: 新开一个会话即可；如 Codex 提示有新 hook 待信任，用 /hooks 允许 Doneko"
+echo "  6. Antigravity（agy）: 新开一个会话即可；在 agy 里输入 /hooks 可查看 Doneko"
 echo ""
 echo "卸载: ${ROOT}/uninstall.sh"

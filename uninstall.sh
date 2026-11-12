@@ -132,6 +132,78 @@ else:
 PY
 fi
 
+GEMINI_HOOKS="${HOME}/.gemini/config/hooks.json"
+if [[ -f "${GEMINI_HOOKS}" ]]; then
+  cp "${GEMINI_HOOKS}" "${GEMINI_HOOKS}.doneko.uninstall.bak.$(date +%Y%m%d%H%M%S)"
+  /usr/bin/python3 - "${GEMINI_HOOKS}" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+if not isinstance(data, dict):
+    sys.exit(0)
+
+MARKERS = ("doneko-notify", "agentping-notify")
+
+def handler_is_ours(h):
+    return isinstance(h, dict) and any(m in (h.get("command") or "") for m in MARKERS)
+
+def strip_ours(items):
+    if not isinstance(items, list):
+        return items, False
+    changed = False
+    out = []
+    for item in items:
+        if handler_is_ours(item):
+            changed = True
+            continue
+        if isinstance(item, dict) and isinstance(item.get("hooks"), list):
+            kept = [h for h in item["hooks"] if not handler_is_ours(h)]
+            if len(kept) != len(item["hooks"]):
+                changed = True
+            if kept:
+                ng = dict(item)
+                ng["hooks"] = kept
+                out.append(ng)
+        else:
+            out.append(item)
+    return out, changed
+
+changed = False
+if "doneko" in data:
+    del data["doneko"]
+    changed = True
+for key, val in list(data.items()):
+    if not isinstance(val, dict):
+        continue
+    new_def = dict(val)
+    hook_changed = False
+    for ev, items in list(new_def.items()):
+        if ev == "enabled":
+            continue
+        cleaned, ch = strip_ours(items)
+        if ch:
+            hook_changed = True
+            if cleaned:
+                new_def[ev] = cleaned
+            else:
+                del new_def[ev]
+    if hook_changed:
+        data[key] = new_def
+        changed = True
+if changed:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print("    已从 ~/.gemini/config/hooks.json 移除 Doneko hooks（其他工具的保留）")
+else:
+    print("    Antigravity hooks.json 中无 Doneko hooks")
+PY
+fi
+
 CODEX_CFG="${HOME}/.codex/config.toml"
 if [[ -f "${CODEX_CFG}" ]]; then
   cp "${CODEX_CFG}" "${CODEX_CFG}.doneko.uninstall.bak.$(date +%Y%m%d%H%M%S)"

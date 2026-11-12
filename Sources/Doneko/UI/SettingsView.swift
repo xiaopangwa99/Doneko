@@ -41,6 +41,9 @@ struct SettingsView: View {
                     Button("测试 Codex") {
                         EventRouter.shared.testAlert(source: .codex)
                     }
+                    Button("测试 Antigravity") {
+                        EventRouter.shared.testAlert(source: .antigravity)
+                    }
                 }
                 Text("会强制弹出全部已开启的效果（忽略「不打扰」）。")
                     .font(.caption)
