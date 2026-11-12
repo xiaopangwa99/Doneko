@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# doneko-notify — fire-and-forget bridge from Claude Code / Codex → Doneko
+# doneko-notify — fire-and-forget bridge from Claude Code / Codex / Antigravity → Doneko
 # Must return instantly. Never block the agent.
 set -euo pipefail
 
 DONEKO_HOME="${HOME}/.doneko"
-SOCK="${HOME}/Library/Application Support/Doneko/doneko.sock"
+SOCK="${DONEKO_SOCK:-${HOME}/Library/Application Support/Doneko/doneko.sock}"
 LOG_DIR="${DONEKO_HOME}/logs"
 mkdir -p "${LOG_DIR}" 2>/dev/null || true
 
@@ -53,7 +53,7 @@ for arg in "$@"; do
     --source=*) EXPLICIT_SOURCE="${arg#--source=}" ;;
     --kind=*)   EXPLICIT_KIND="${arg#--kind=}" ;;
     --help|-h)
-      echo "Usage: doneko-notify [--source=claude|codex] [--kind=started|completed|needsAttention] [codex-json]"
+      echo "Usage: doneko-notify [--source=claude|codex|antigravity] [--kind=started|completed|needsAttention] [codex-json]"
       exit 0
       ;;
     *) POSITIONAL+=("$arg") ;;
@@ -64,6 +64,32 @@ STDIN_DATA=""
 if [[ ! -t 0 ]]; then
   STDIN_DATA="$(dd bs=1048576 count=1 2>/dev/null || true)"
 fi
+
+# Antigravity Stop hooks must print a JSON decision on stdout.
+# "continue" would re-enter the loop; always emit {"decision":"stop"}.
+NEED_STOP_DECISION=0
+_DONEKO_STOP_EMITTED=0
+maybe_need_stop_decision() {
+  local src="${1:-}" kind="${2:-}" payload="${3:-}"
+  if [[ "${src}" == "antigravity" && "${kind}" == "completed" ]]; then
+    NEED_STOP_DECISION=1
+    return
+  fi
+  if [[ "${payload}" == *"conversationId"* || "${src}" == "antigravity" ]]; then
+    if [[ "${kind}" == "completed" || "${payload}" == *"fullyIdle"* || "${payload}" == *"terminationReason"* ]]; then
+      NEED_STOP_DECISION=1
+    fi
+  fi
+}
+emit_stop_if_needed() {
+  if [[ "${NEED_STOP_DECISION}" -eq 1 && "${_DONEKO_STOP_EMITTED}" -eq 0 ]]; then
+    _DONEKO_STOP_EMITTED=1
+    printf '%s\n' '{"decision":"stop"}'
+  fi
+}
+trap emit_stop_if_needed EXIT
+
+maybe_need_stop_decision "${EXPLICIT_SOURCE}" "${EXPLICIT_KIND}" "${STDIN_DATA}"
 
 PAYLOAD_JSON=""
 SOURCE="${EXPLICIT_SOURCE:-unknown}"
@@ -106,12 +132,131 @@ cwd = cwd_fallback
 preview = ""
 session = ""
 
+
+def truncate(s, n=120):
+    s = " ".join((s or "").split())
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def extract_text(content):
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                t = item.get("text") or item.get("content") or ""
+                if isinstance(t, str):
+                    parts.append(t)
+        return " ".join(parts).strip()
+    if isinstance(content, dict):
+        return extract_text(content.get("text") or content.get("content") or "")
+    return ""
+
+
+def read_tail(path, max_bytes=262144):
+    try:
+        size = os.path.getsize(path)
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                f.readline()
+            return f.read()
+    except Exception:
+        return ""
+
+
+def last_assistant_from_transcript(path):
+    if not path:
+        return ""
+    expanded = os.path.abspath(os.path.expanduser(str(path)))
+    candidates = [expanded]
+    base, name = os.path.split(expanded)
+    if name == "transcript.jsonl":
+        candidates.append(os.path.join(base, "transcript_full.jsonl"))
+    for cand in candidates:
+        if not os.path.isfile(cand):
+            continue
+        last = ""
+        for line in read_tail(cand).splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            typ = obj.get("type") or ""
+            # Alert text is the last planner reply. Later MODEL tool steps
+            # (RUN_COMMAND and similar) must not replace it.
+            if typ != "PLANNER_RESPONSE":
+                continue
+            text = extract_text(obj.get("content"))
+            if text:
+                last = text
+        if last:
+            return last
+    return ""
+
+
+def looks_like_antigravity(p):
+    if not isinstance(p, dict):
+        return False
+    if p.get("conversationId"):
+        return True
+    if "workspacePaths" in p and ("transcriptPath" in p or "fullyIdle" in p or "lastUserInput" in p):
+        return True
+    if "fullyIdle" in p or "terminationReason" in p:
+        return True
+    return False
+
+
 if isinstance(payload, dict) and payload.get("type") == "agent-turn-complete":
     source = "codex"
     kind = kind_explicit or "completed"
     cwd = payload.get("cwd") or cwd_fallback
     preview = payload.get("last-assistant-message") or ""
     session = str(payload.get("thread-id") or payload.get("turn-id") or "")
+elif source == "antigravity" or looks_like_antigravity(payload):
+    source = "antigravity"
+    workspaces = payload.get("workspacePaths") if isinstance(payload, dict) else None
+    if isinstance(workspaces, list) and workspaces:
+        first = workspaces[0]
+        if isinstance(first, str) and first.strip():
+            cwd = first
+        elif isinstance(first, dict):
+            cwd = first.get("path") or first.get("uri") or cwd_fallback
+    else:
+        cwd = ((payload.get("cwd") if isinstance(payload, dict) else None) or cwd_fallback)
+
+    session = str((payload.get("conversationId") if isinstance(payload, dict) else None) or "")
+    last_input = (payload.get("lastUserInput") if isinstance(payload, dict) else None) or ""
+    reason = str((payload.get("terminationReason") if isinstance(payload, dict) else None) or "")
+    err = payload.get("error") if isinstance(payload, dict) else None
+    err_text = err.strip() if isinstance(err, str) else ""
+    is_stop = (
+        kind_explicit == "completed"
+        or (isinstance(payload, dict) and ("fullyIdle" in payload or "terminationReason" in payload))
+    )
+    is_error = reason.lower() == "error" or bool(err_text)
+    if is_stop:
+        kind = "completed"
+        # Background work still running: skip the alert (a later Stop should follow).
+        # Errors are still reported even if fullyIdle is false.
+        if isinstance(payload, dict) and payload.get("fullyIdle") is False and not is_error:
+            sys.exit(0)
+        preview = last_assistant_from_transcript(payload.get("transcriptPath") if isinstance(payload, dict) else None)
+        if not preview:
+            preview = last_input or err_text or "任务完成"
+        if is_error and not preview.startswith("出错："):
+            preview = "出错：" + (preview if preview != "任务完成" else (err_text or "任务完成"))
+    else:
+        kind = kind_explicit or "started"
+        preview = last_input
 elif isinstance(payload, dict) and payload.get("hook_event_name"):
     if source == "unknown":
         source = "claude"
@@ -134,9 +279,6 @@ elif isinstance(payload, dict) and payload.get("hook_event_name"):
     )
     session = str(payload.get("session_id") or "")
 
-def truncate(s, n=120):
-    s = " ".join((s or "").split())
-    return s if len(s) <= n else s[:n] + "…"
 
 def normalize_tty(t):
     if not t:
@@ -175,7 +317,7 @@ if ghostty_surface == "":
 event = {
     "id": str(uuid.uuid4()),
     "kind": kind,
-    "source": source if source in ("claude", "codex") else "unknown",
+    "source": source if source in ("claude", "codex", "antigravity") else "unknown",
     "cwd": cwd,
     "projectName": project,
     "preview": truncate(preview),
@@ -197,6 +339,19 @@ PY
 )"
 
 if [[ -z "${EVENT_JSON}" ]]; then
+  emit_stop_if_needed
+  exit 0
+fi
+
+# Refresh the stop-decision flag from the built event (covers payload auto-detect).
+EVENT_META="$(/usr/bin/python3 -c 'import json,sys; e=json.loads(sys.argv[1]); print(e.get("source",""), e.get("kind",""))' "${EVENT_JSON}" 2>/dev/null || true)"
+maybe_need_stop_decision ${EVENT_META:-} ""
+
+if [[ "${DONEKO_DRY_RUN:-}" == "1" ]]; then
+  if [[ -n "${EVENT_JSON}" ]]; then
+    printf "%s\n" "${EVENT_JSON}" >&2
+  fi
+  emit_stop_if_needed
   exit 0
 fi
 
@@ -243,8 +398,8 @@ import json, sys, subprocess
 ev = json.loads(sys.argv[1])
 if ev.get("kind") == "started":
     sys.exit(0)
-title_map = {"claude": "Claude Code 已回答", "codex": "Codex 已回答"}
-attn_map = {"claude": "Claude Code 需要关注", "codex": "Codex 需要关注"}
+title_map = {"claude": "Claude Code 已回答", "codex": "Codex 已回答", "antigravity": "Antigravity 已回答"}
+attn_map = {"claude": "Claude Code 需要关注", "codex": "Codex 需要关注", "antigravity": "Antigravity 需要关注"}
 src = ev.get("source")
 title = title_map.get(src, "Agent 已回答")
 if ev.get("kind") == "needsAttention":
@@ -261,4 +416,5 @@ PY
   fi
 ) >/dev/null 2>>"${LOG_DIR}/notify.log" &
 
+emit_stop_if_needed
 exit 0

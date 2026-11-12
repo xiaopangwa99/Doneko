@@ -4,6 +4,7 @@ import AppKit
 enum AgentSource: String, Codable, CaseIterable, Identifiable {
     case claude
     case codex
+    case antigravity
     case unknown
 
     var id: String { rawValue }
@@ -12,6 +13,7 @@ enum AgentSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
+        case .antigravity: return "Antigravity"
         case .unknown: return "Agent"
         }
     }
@@ -20,6 +22,7 @@ enum AgentSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .claude: return "Claude Code 已回答"
         case .codex: return "Codex 已回答"
+        case .antigravity: return "Antigravity 已回答"
         case .unknown: return "Agent 已回答"
         }
     }
@@ -28,6 +31,7 @@ enum AgentSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .claude: return "Claude Code 工作中"
         case .codex: return "Codex 工作中"
+        case .antigravity: return "Antigravity 工作中"
         case .unknown: return "Agent 工作中"
         }
     }
@@ -36,6 +40,7 @@ enum AgentSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .claude: return "Claude Code 需要关注"
         case .codex: return "Codex 需要关注"
+        case .antigravity: return "Antigravity 需要关注"
         case .unknown: return "Agent 需要关注"
         }
     }
@@ -45,6 +50,7 @@ enum AgentSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .claude: return (0.85, 0.45, 0.25)
         case .codex: return (0.25, 0.65, 0.95)
+        case .antigravity: return (0.20, 0.75, 0.55)
         case .unknown: return (0.55, 0.55, 0.60)
         }
     }
