@@ -62,7 +62,27 @@ enum AgentEventKind: String, Codable {
     case needsAttention
 }
 
-struct TerminalInfo: Codable, Equatable {
+/// Where a click should go. Missing on history written before this field existed.
+enum OriginHost: String, Codable, Equatable {
+    case terminal
+    case antigravityApp = "antigravity-app"
+    case antigravityIDE = "antigravity-ide"
+    case unknown
+
+    /// Graphical client to activate. Terminal sessions and unknown hosts have none.
+    var applicationBundleID: String? {
+        switch self {
+        case .antigravityApp:
+            return "com.google.antigravity"
+        case .antigravityIDE:
+            return "com.google.antigravity-ide"
+        case .terminal, .unknown:
+            return nil
+        }
+    }
+}
+
+struct TerminalInfo: Equatable {
     var termProgram: String?
     var termSessionID: String?
     var itermSessionID: String?
@@ -71,6 +91,8 @@ struct TerminalInfo: Codable, Equatable {
     var tty: String?
     var parentPID: Int?
     var bundleID: String?
+    /// `unknown` when an older history row did not record a host.
+    var host: OriginHost = .unknown
 
     static func captureFromEnvironment(
         ttyOverride: String? = nil,
@@ -130,6 +152,38 @@ struct TerminalInfo: Codable, Equatable {
         default:
             return nil
         }
+    }
+}
+
+extension TerminalInfo: Codable {
+    enum CodingKeys: String, CodingKey {
+        case termProgram, termSessionID, itermSessionID, ghosttySurfaceID
+        case tty, parentPID, bundleID, host
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        termProgram = try container.decodeIfPresent(String.self, forKey: .termProgram)
+        termSessionID = try container.decodeIfPresent(String.self, forKey: .termSessionID)
+        itermSessionID = try container.decodeIfPresent(String.self, forKey: .itermSessionID)
+        ghosttySurfaceID = try container.decodeIfPresent(String.self, forKey: .ghosttySurfaceID)
+        tty = try container.decodeIfPresent(String.self, forKey: .tty)
+        parentPID = try container.decodeIfPresent(Int.self, forKey: .parentPID)
+        bundleID = try container.decodeIfPresent(String.self, forKey: .bundleID)
+        // History and notifications from before host existed keep loading.
+        host = try container.decodeIfPresent(OriginHost.self, forKey: .host) ?? .unknown
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(termProgram, forKey: .termProgram)
+        try container.encodeIfPresent(termSessionID, forKey: .termSessionID)
+        try container.encodeIfPresent(itermSessionID, forKey: .itermSessionID)
+        try container.encodeIfPresent(ghosttySurfaceID, forKey: .ghosttySurfaceID)
+        try container.encodeIfPresent(tty, forKey: .tty)
+        try container.encodeIfPresent(parentPID, forKey: .parentPID)
+        try container.encodeIfPresent(bundleID, forKey: .bundleID)
+        try container.encode(host, forKey: .host)
     }
 }
 

@@ -187,7 +187,16 @@ Stop hook **必须**在 stdout 打印 `{"decision":"stop"}`。若写成 `"contin
 
 会话 id 使用 `conversationId`，工作目录取 `workspacePaths[0]`，摘要优先读 `transcriptPath` 里最后一条模型回复（`PLANNER_RESPONSE` 的 `content`），没有则回退为「任务完成」。若 `terminationReason` 为 `error`，摘要会加上「出错：」前缀。
 
-**限制：** Antigravity 没有「等待许可 / 需要输入」这类 hook，因此不会发出「需要关注」提醒。
+**限制：** Antigravity 没有「等待许可 / 需要输入」这类 hook，因此不会发出「需要关注」提醒。也没有已核实的「打开某一条旧会话」链接，所以点击不会伪造 URL，也不会新开一轮对话。
+
+点击顶部胶囊、系统通知，或菜单里的工作中 / 完成记录时：
+
+- Antigravity App（`transcriptPath` 在 `~/.gemini/antigravity/`，或父进程是 `Antigravity.app`）只激活 `com.google.antigravity`
+- Antigravity IDE 只激活 `com.google.antigravity-ide`
+- 在真实终端里的 `agy`（数据目录 `antigravity-cli`，且没有 GUI 父进程）仍按 tty / 终端会话跳转
+- 无法确认来源时，不再随便打开一个已安装的终端
+
+进程祖先里的 App / IDE，以及 transcript 所在数据目录，优先于 hook 可能继承到的 `TERM_PROGRAM`。前台不打扰也按这个来源判断：App / IDE 只在自己位于最前台时静音。
 
 在 `agy` 里输入 `/hooks` 可查看当前已加载的 hook。
 

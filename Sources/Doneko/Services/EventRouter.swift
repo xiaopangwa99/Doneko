@@ -122,7 +122,9 @@ final class EventRouter {
             tty: obj["tty"] as? String ?? nested?["tty"] as? String,
             parentPID: obj["ppid"] as? Int ?? nested?["parentPID"] as? Int,
             bundleID: TerminalInfo.bundleID(forTermProgram: termProgram ?? nested?["termProgram"] as? String)
-                ?? nested?["bundleID"] as? String
+                ?? nested?["bundleID"] as? String,
+            host: OriginHost(rawValue: (nested?["host"] as? String) ?? (obj["host"] as? String) ?? "")
+                ?? .unknown
         )
         return AgentEvent(
             id: (obj["id"] as? String) ?? UUID().uuidString,

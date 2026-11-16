@@ -8,6 +8,30 @@ enum TerminalJumper {
     ///   - terminal: Captured terminal identity from the notify hook.
     ///   - cwd: Event working directory; used as a Ghostty fallback (may be imprecise if several tabs share a cwd).
     static func jump(to terminal: TerminalInfo, cwd: String? = nil) {
+        // A confirmed graphical client wins over any tty or TERM_PROGRAM the
+        // hook process inherited. Activate that app only — there is no
+        // documented deep link to an existing conversation.
+        if let bundle = terminal.host.applicationBundleID {
+            if !activateBundle(bundle) {
+                NSLog("Doneko: 未安装 \(bundle)，无法打开 Antigravity")
+            }
+            return
+        }
+        // `unknown` (including history from before `host` existed) may still
+        // focus a recorded tty or terminal, but must not launch some other
+        // installed terminal. Confirmed CLI sessions keep that last resort.
+        jumpToTerminal(
+            terminal,
+            cwd: cwd,
+            allowInstalledFallback: terminal.host == .terminal
+        )
+    }
+
+    private static func jumpToTerminal(
+        _ terminal: TerminalInfo,
+        cwd: String?,
+        allowInstalledFallback: Bool
+    ) {
         if isGhostty(terminal) {
             if jumpGhostty(tty: terminal.tty, cwd: cwd) { return }
             activateBundle("com.mitchellh.ghostty")
@@ -25,9 +49,11 @@ enum TerminalJumper {
 
         let bundle = terminal.bundleID
             ?? TerminalInfo.bundleID(forTermProgram: terminal.termProgram)
-        if let bundle, activateBundle(bundle) { return }
+        if let bundle, !bundle.isEmpty, activateBundle(bundle) { return }
 
-        // Last resort: frontmost terminal-like app already running.
+        guard allowInstalledFallback else { return }
+
+        // Last resort for a confirmed terminal session whose tty did not match.
         for candidate in [
             "com.googlecode.iterm2",
             "com.apple.Terminal",
@@ -261,9 +287,16 @@ enum TerminalJumper {
         guard let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
             return false
         }
+        if let app = terminal.host.applicationBundleID {
+            return front == app
+        }
         let expected = terminal.bundleID
             ?? TerminalInfo.bundleID(forTermProgram: terminal.termProgram)
-        if let expected, front == expected { return true }
+        if let expected, !expected.isEmpty, front == expected { return true }
+        // Only a confirmed terminal session treats "some terminal is frontmost"
+        // as the origin. An unidentified Antigravity host must still alert.
+        guard terminal.host == .terminal else { return false }
+        let recorded = expected
         let terminals: Set<String> = [
             "com.apple.Terminal",
             "com.googlecode.iterm2",
@@ -276,7 +309,7 @@ enum TerminalJumper {
             "net.kovidgoyal.kitty",
             "com.github.wez.wezterm"
         ]
-        if expected == nil, terminals.contains(front) { return true }
+        if recorded == nil || recorded?.isEmpty == true, terminals.contains(front) { return true }
         return false
     }
 }
