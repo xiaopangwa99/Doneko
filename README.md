@@ -1,59 +1,61 @@
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 # Doneko
 
-> **done** + **neko**（日语「猫」）— macOS 菜单栏爪印，在 Claude Code / Codex / Antigravity CLI 回答结束后轻轻提醒你。
+> **done** + **neko** (Japanese for “cat”) — a macOS menu-bar paw that quietly tells you when Claude Code, Codex, or Antigravity CLI has finished answering.
 
-- 事件驱动，无轮询；平时几乎不占 CPU
-- 原生 Swift / SwiftUI / AppKit（非 Electron）
-- 要求 macOS 13+
-- UI 为简体中文；菜单栏是一枚猫爪印
+- Event-driven, no polling; almost no CPU while idle
+- Native Swift / SwiftUI / AppKit (not Electron)
+- Requires macOS 13+
+- The app UI is Simplified Chinese; the menu bar shows a cat paw
 
-## 功能
+## Features
 
-| 效果 | 说明 | 默认 |
+| Effect | What it does | Default |
 | --- | --- | --- |
-| 系统通知 | 横幅 + 系统提示音（默认柔和的 **Purr**），点击跳回终端 | 开 |
-| 顶部胶囊 | 灵动岛式提示，带爪印，可点 | 开 |
-| 边缘柔光 | 全屏点击穿透的彩色光晕（Claude 偏橙 / Codex 偏蓝 / Antigravity 偏绿） | 开 |
-| 菜单栏爪印 | 空闲为单色模板爪印；工作中轻微跳动；未读时整枚爪印变为橙色（打开菜单或读完后恢复） | 开 |
-| 前台不打扰 | 来源终端已在前台则不弹提醒 | 开 |
-| 登录启动 | 通过 `SMAppService` 注册 | 关 |
+| System notification | Banner plus a system sound (soft **Purr** by default). Click to go back | On |
+| Top capsule | Dynamic Island-style banner with the paw. Clickable | On |
+| Edge glow | Full-screen click-through color wash (Claude leans orange / Codex leans blue / Antigravity leans green) | On |
+| Menu-bar paw | Idle: monochrome template paw. Working: a light bounce. Unread: the whole paw turns orange (opening the menu, or reading everything, restores it) | On |
+| Quiet in the foreground | No alert when the source terminal is already frontmost | On |
+| Launch at login | Registered with `SMAppService` | Off |
 
-菜单栏历史每个会话只保留最新一条，灰色第二行是回复摘要；点击一条即可跳回对应终端：
+Menu-bar history keeps only the newest row per session. The gray second line is the reply summary. Click a row to jump back to that terminal:
 
-- **Ghostty**（推荐 ≥ **1.4.0**）：按 tty 精确定位到具体 terminal / tab；无 tty 时回退到工作目录匹配（同目录多 tab 可能不准）
-- **Terminal.app / iTerm2**：按 tty / session id（iTerm 会解析 `ITERM_SESSION_ID` 冒号后的 UUID）
-- 其它终端：按 `TERM_PROGRAM` 激活整个应用
+- **Ghostty** (recommended ≥ **1.4.0**): focus the exact terminal / tab by tty. With no tty, fall back to the working directory (several tabs in the same directory can land on the wrong one)
+- **Terminal.app / iTerm2**: match tty / session id (iTerm uses the UUID after the colon in `ITERM_SESSION_ID`)
+- Other terminals: activate the whole app from `TERM_PROGRAM`
 
-Ghostty AppleScript 支持自 **1.3.0** 起；按 tty 聚焦需要 **≥ 1.4.0**。首次跳转需在「系统设置 → 隐私与安全性 → 自动化」允许 Doneko 控制 Ghostty。
+Ghostty AppleScript support starts at **1.3.0**. Focusing by tty needs **≥ 1.4.0**. The first jump asks you, in System Settings → Privacy & Security → Automation, to let Doneko control Ghostty.
 
-> 未内置独立「喵叫」音频文件（避免版权素材）；请使用系统音效 **Purr** / **Glass** 等。
+> There is no separate “meow” audio file (that would mean shipping copyrighted material). Use the system sounds **Purr**, **Glass**, and so on.
 
-## 安装
+## Install
 
-在 **Mac** 上（需已安装 Xcode 或 Command Line Tools）：
+On a **Mac** (Xcode or the Command Line Tools already installed):
 
 ```bash
 cd /path/to/Doneko
 ./install.sh
 ```
 
-脚本会：
+The script:
 
-1. `swift build -c release`
-2. 组装 `~/Applications/Doneko.app`（`LSUIElement`，无 Dock 图标；Finder 图标为橙色圆角爪印）并 ad-hoc 签名
-3. 安装 `~/.doneko/bin/doneko-notify`
-4. 安全合并 hooks 到 `~/.claude/settings.json`（先备份；同时清掉旧版 AgentPing hooks）
-5. 把 Doneko 的 handlers 合并进 `~/.codex/hooks.json`（`UserPromptSubmit` / `Stop` / `PermissionRequest`；其它工具的 hooks 会保留）。已有的 `notify` **保持不动**（只会删掉旧版 Doneko 自己写过的那一行，避免和 hooks 重复提醒）。首次需在 Codex 里用 `/hooks` 信任这些 hook
-6. 若已安装 Antigravity（存在 `~/.gemini` 或 `agy`），把 Doneko 合并进 `~/.gemini/config/hooks.json`（`PreInvocation` / `Stop`；其它 hook 保留）。在 `agy` 里输入 `/hooks` 可查看
-7. 启动应用
+1. Runs `swift build -c release`
+2. Assembles `~/Applications/Doneko.app` (`LSUIElement`, so no Dock icon; the Finder icon is an orange rounded paw) and ad-hoc signs it
+3. Installs `~/.doneko/bin/doneko-notify`
+4. Merges hooks into `~/.claude/settings.json` (backs up first, and removes legacy AgentPing hooks)
+5. Merges Doneko’s handlers into `~/.codex/hooks.json` (`UserPromptSubmit` / `Stop` / `PermissionRequest`; other tools’ hooks stay). An existing `notify` line is **left alone** (only a `notify` line that an older Doneko wrote is removed, so hooks and `notify` do not alert twice). The first time, trust these hooks in Codex with `/hooks`
+6. If Antigravity is installed (`~/.gemini` exists, or `agy` is on `PATH`), merges Doneko into `~/.gemini/config/hooks.json` (`PreInvocation` / `Stop`; other hooks stay). In `agy`, type `/hooks` to see them
+7. Launches the app
 
-## 如何测试
+## How to test
 
-### 应用内测试
+### In the app
 
-菜单栏爪印 → **设置…** → **测试 Claude Code / 测试 Codex / 测试 Antigravity**
+Menu-bar paw → **设置…** (Settings…) → **测试 Claude Code** / **测试 Codex** / **测试 Antigravity**
 
-### 手动打脚本
+### Call the script yourself
 
 ```bash
 echo '{"session_id":"t1","cwd":"/tmp/demo","hook_event_name":"Stop","last_assistant_message":"搞定了"}' \
@@ -62,54 +64,54 @@ echo '{"session_id":"t1","cwd":"/tmp/demo","hook_event_name":"Stop","last_assist
 ~/.doneko/bin/doneko-notify --source=codex --kind=completed \
   '{"type":"agent-turn-complete","cwd":"/tmp/demo","last-assistant-message":"Build passed."}'
 
-# Antigravity Stop：脚本会向 stdout 打印 {"decision":"stop"}；DONEKO_DRY_RUN=1 只解析不投递
+# Antigravity Stop: the script prints {"decision":"stop"} on stdout. DONEKO_DRY_RUN=1 parses and does not deliver.
 printf '%s' '{"conversationId":"t1","workspacePaths":["/tmp/demo"],"fullyIdle":true,"terminationReason":"model_stop","lastUserInput":"hi","transcriptPath":"/tmp/missing.jsonl"}' \
   | DONEKO_DRY_RUN=1 ~/.doneko/bin/doneko-notify --source=antigravity --kind=completed
 ```
 
-### 真实 Agent
+### A real agent
 
-1. 确认菜单栏有爪印
-2. Claude Code：提问并等待回答结束
-3. Codex：提问后爪印进入工作中，回答结束或请求权限时提醒（需已用 `/hooks` 信任）
-4. Antigravity（`agy`）：提问后爪印进入工作中，回答结束后提醒。在 `agy` 里输入 `/hooks` 可查看 Doneko
+1. Confirm the paw is in the menu bar
+2. Claude Code: ask something and wait until the answer finishes
+3. Codex: after you ask, the paw goes into the working animation; you are notified when the answer finishes or a permission is requested (the hooks must already be trusted with `/hooks`)
+4. Antigravity (`agy`): after you ask, the paw goes into the working animation, and you are notified when the answer finishes. In `agy`, type `/hooks` to see Doneko
 
-## 卸载
+## Uninstall
 
 ```bash
 ./uninstall.sh
 ```
 
-会删除 App、notify 脚本，并从 Claude settings、Codex `hooks.json` 与 Antigravity `~/.gemini/config/hooks.json` 中移除 **Doneko 与旧版 AgentPing** 写入的条目（`config.toml` 里旧版 Doneko 的 `notify` 行也会删掉，其它 `notify` 保留）。
+This removes the app and the notify script, and removes entries that **Doneko and legacy AgentPing** wrote in Claude settings, Codex `hooks.json`, and Antigravity `~/.gemini/config/hooks.json`. An older Doneko `notify` line in `config.toml` is removed too. Any other `notify` line stays.
 
-## 架构说明
+## Architecture
 
 ```
 Claude Code hooks / Codex hooks / Antigravity hooks
         │
         ▼
- ~/.doneko/bin/doneko-notify   （立刻后台投递后 exit 0）
+ ~/.doneko/bin/doneko-notify   (deliver in the background, then exit 0)
         │
-        ├─ Unix domain socket（首选）
+        ├─ Unix domain socket (preferred)
         │     ~/Library/Application Support/Doneko/doneko.sock
-        ├─ open doneko://event?json=…（App 未运行时拉起）
-        └─ osascript 通知（兜底）
+        ├─ open doneko://event?json=… (launches the app if it is not running)
+        └─ osascript notification (last resort)
         │
         ▼
-   Doneko.app（菜单栏爪印）
+   Doneko.app (menu-bar paw)
 ```
 
 ### Claude Code
 
-- `UserPromptSubmit` → `started`（爪印进入工作中动画）
+- `UserPromptSubmit` → `started` (the paw starts the working animation)
 - `Stop` → `completed`
 - `Notification` → `needsAttention`
 
-stdin 为 Claude 官方 JSON。若 `stop_hook_active == true` 则静默退出。
+stdin is Claude’s own JSON. If `stop_hook_active == true`, the script exits quietly.
 
 ### Codex CLI
 
-安装写入的是 `~/.codex/hooks.json`，不再占用 `config.toml` 里那一个 `notify` 槽。现在有开始事件，菜单栏「工作中」动画会跟着走。Codex 会要求你用 `/hooks` **信任一次** 这些新 hook。
+The installer writes `~/.codex/hooks.json`. It does not take the single `notify` slot in `config.toml`. There is now a start event, so the menu-bar “working” animation follows the turn. Codex asks you to **trust** these new hooks once with `/hooks`.
 
 ```json
 {
@@ -148,15 +150,15 @@ stdin 为 Claude 官方 JSON。若 `stop_hook_active == true` 则静默退出。
 }
 ```
 
-- `UserPromptSubmit` → `started`（爪印进入工作中动画）
+- `UserPromptSubmit` → `started` (the paw starts the working animation)
 - `Stop` → `completed`
 - `PermissionRequest` → `needsAttention`
 
-事件 JSON 由 Codex 经 stdin 传入。
+Codex passes the event JSON on stdin.
 
 ### Antigravity CLI
 
-安装时若检测到 `~/.gemini` 或 `agy`，会把 Doneko 写入全局 `~/.gemini/config/hooks.json`（CLI / App / IDE 共用）。`PreInvocation` 与 `Stop` 必须是扁平的 handler 列表，不能套 `matcher` / `hooks` 那一层。
+If `~/.gemini` exists or `agy` is on `PATH`, the installer writes Doneko into the global `~/.gemini/config/hooks.json` (shared by the CLI, the app, and the IDE). `PreInvocation` and `Stop` must be a flat handler list. Do not wrap them in a `matcher` / `hooks` group.
 
 ```json
 {
@@ -180,63 +182,63 @@ stdin 为 Claude 官方 JSON。若 `stop_hook_active == true` 则静默退出。
 }
 ```
 
-- `PreInvocation` → `started`（每次调用模型前；爪印进入工作中动画）
-- `Stop` → `completed`（仅在 `fullyIdle` 为 true 时提醒；仍有后台任务时跳过，等下一次 Stop）
+- `PreInvocation` → `started` (before each model call; the paw starts the working animation)
+- `Stop` → `completed` (alerts only when `fullyIdle` is true; if background work is still running, skip and wait for the next Stop)
 
-Stop hook **必须**在 stdout 打印 `{"decision":"stop"}`。若写成 `"continue"`，agent 会重新进入循环。其它 hook 保持快速退出、不打印决策即可。
+The Stop hook **must** print `{"decision":"stop"}` on stdout. `"continue"` makes the agent enter the loop again. Other hooks should exit quickly and print no decision.
 
-会话 id 使用 `conversationId`，工作目录取 `workspacePaths[0]`，摘要优先读 `transcriptPath` 里最后一条模型回复（`PLANNER_RESPONSE` 的 `content`），没有则回退为「任务完成」。若 `terminationReason` 为 `error`，摘要会加上「出错：」前缀。
+The session id is `conversationId`. The working directory is `workspacePaths[0]`. The summary prefers the last model reply in `transcriptPath` (`content` of the last `PLANNER_RESPONSE`). If that is missing, it falls back to the literal string `任务完成`. If `terminationReason` is `error`, the summary is prefixed with the literal string `出错：`.
 
-**限制：** Antigravity 没有「等待许可 / 需要输入」这类 hook，因此不会发出「需要关注」提醒。也没有已核实的「打开某一条旧会话」链接，所以点击不会伪造 URL，也不会新开一轮对话。
+**Limit:** Antigravity has no “waiting for permission / needs input” hook, so Doneko does not raise a needs-attention alert for it. There is also no verified link that opens one existing conversation, so a click does not invent a URL and does not start a new chat.
 
-点击顶部胶囊、系统通知，或菜单里的工作中 / 完成记录时：
+Clicking the top capsule, the system notification, or a working / completed row in the menu:
 
-- Antigravity App（`transcriptPath` 在 `~/.gemini/antigravity/`，或父进程是 `Antigravity.app`）只激活 `com.google.antigravity`
-- Antigravity IDE 只激活 `com.google.antigravity-ide`
-- 在真实终端里的 `agy`（数据目录 `antigravity-cli`，且没有 GUI 父进程）仍按 tty / 终端会话跳转
-- 无法确认来源时，不再随便打开一个已安装的终端
+- Antigravity App (`transcriptPath` under `~/.gemini/antigravity/`, or a parent process that is `Antigravity.app`) only activates `com.google.antigravity`
+- Antigravity IDE only activates `com.google.antigravity-ide`
+- `agy` in a real terminal (data directory `antigravity-cli`, and no GUI parent) still jumps by tty / terminal session
+- If the origin cannot be confirmed, Doneko does not open some other installed terminal
 
-进程祖先里的 App / IDE，以及 transcript 所在数据目录，优先于 hook 可能继承到的 `TERM_PROGRAM`。前台不打扰也按这个来源判断：App / IDE 只在自己位于最前台时静音。
+An App / IDE parent process, and the data directory that holds the transcript, win over a `TERM_PROGRAM` the hook may have inherited. Quiet-in-the-foreground uses the same origin: the App or IDE is silenced only when that app itself is frontmost.
 
-在 `agy` 里输入 `/hooks` 可查看当前已加载的 hook。
+In `agy`, type `/hooks` to see the hooks that are loaded.
 
-## 权限提示（首次）
+## First-run permissions
 
-1. **通知** → 允许  
-2. **自动化**（跳回 Terminal / iTerm / **Ghostty**）→ 允许 Doneko 控制对应终端  
-3. Gatekeeper：右键 App → 打开  
+1. **Notifications** → Allow
+2. **Automation** (jump back to Terminal / iTerm / **Ghostty**) → allow Doneko to control that terminal
+3. Gatekeeper: right-click the app → Open
 
-> Ghostty：请升级到 **≥ 1.4** 以获得按 tty 精跳；1.3 仅有 AppleScript / 工作目录匹配。若提示自动化权限被拒，Doneko 不会假装跳转成功。
+> Ghostty: upgrade to **≥ 1.4** for an exact tty jump. 1.3 only has AppleScript / working-directory matching. If Automation permission is denied, Doneko does not pretend the jump succeeded.
 
-## 故障排查
+## Troubleshooting
 
-| 现象 | 排查 |
+| What you see | What to check |
 | --- | --- |
-| 完全没反应 | 确认菜单栏有爪印；看 `~/.doneko/logs/notify.log` |
-| 只有通知、没有胶囊 | 设置是否关闭了胶囊；是否「前台不打扰」 |
-| Claude 不触发 | `/hooks` 是否有 Doneko；检查 `~/.claude/settings.json` |
-| Codex 不触发 | 确认 `~/.codex/config.toml` 里 `[features] hooks = true`；在 Codex 中用 `/hooks` 信任 Doneko |
-| Antigravity 不触发 | 确认 `~/.gemini/config/hooks.json` 有 `doneko`；在 `agy` 里输入 `/hooks` 查看 |
-| 跳转失败 | 隐私与安全性 → 自动化 → 勾选 Doneko（含 Ghostty） |
-| Ghostty 只激活窗口、不切 tab | 升级到 Ghostty ≥ 1.4；确认 hook 采集到了 tty（看事件 JSON / notify 日志） |
-| 同目录多个 Ghostty tab 跳错 | 正常：无 tty 时只能按 cwd 猜；修好 tty 采集后按 tty 精跳 |
+| Nothing at all | The paw is in the menu bar; look at `~/.doneko/logs/notify.log` |
+| A notification, but no capsule | Whether the capsule is turned off; whether **前台不打扰** is on (the setting is labeled **终端前台时不打扰**) |
+| Claude never fires | `/hooks` lists Doneko; check `~/.claude/settings.json` |
+| Codex never fires | `[features] hooks = true` in `~/.codex/config.toml`; trust Doneko with `/hooks` inside Codex |
+| Antigravity never fires | `~/.gemini/config/hooks.json` contains `doneko`; in `agy`, type `/hooks` |
+| The jump fails | System Settings → Privacy & Security → Automation → enable Doneko (including Ghostty) |
+| Ghostty comes forward but does not switch tabs | Upgrade to Ghostty ≥ 1.4; confirm the hook captured a tty (event JSON / notify log) |
+| Several Ghostty tabs in one directory, and the wrong tab is focused | Expected when there is no tty: the guess is by cwd. After tty capture works, the jump uses the tty |
 
 ```bash
 ls -l ~/Library/Application\ Support/Doneko/doneko.sock
 ```
 
-## 开发
+## Development
 
 ```bash
 swift build -c release
-# 产物一般在 .build/release/Doneko
+# the binary is usually at .build/release/Doneko
 
-# 重新生成 App 图标（需要 Pillow）。install.sh 会在 Mac 上用 iconutil 打成 icns。
+# Regenerate the app icon (needs Pillow). On a Mac, install.sh uses iconutil to build the icns.
 python3 Scripts/render-app-icon.py
 ```
 
-Bundle ID：`com.yiming.doneko` · URL Scheme：`doneko://` · MIT License
+Bundle ID: `com.yiming.doneko` · URL scheme: `doneko://` · MIT License
 
-## 许可
+## License
 
 MIT © 2026 YIMING YUAN
