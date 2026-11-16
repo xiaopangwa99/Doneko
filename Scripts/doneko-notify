@@ -40,8 +40,37 @@ resolve_tty() {
   return 0
 }
 
-TTY_VAL="$(resolve_tty || true)"
+# DONEKO_TTY / DONEKO_ANCESTORS are optional test overrides. Production leaves
+# them unset and discovers the tty and parent command lines itself.
+if [[ -n "${DONEKO_TTY+x}" ]]; then
+  TTY_VAL="${DONEKO_TTY}"
+else
+  TTY_VAL="$(resolve_tty || true)"
+fi
 TTY_VAL="$(printf '%s' "${TTY_VAL}" | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+# Parent command lines, nearest first. Used to tell the Antigravity app / IDE
+# from a terminal that merely leaked TERM_PROGRAM into a GUI process.
+collect_ancestors() {
+  local pid i cmd
+  pid="${PPID:-}"
+  i=0
+  while [[ -n "${pid}" && "${pid}" =~ ^[0-9]+$ && "${pid}" -gt 1 && "${i}" -lt 16 ]]; do
+    cmd="$(ps -ww -o command= -p "${pid}" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true)"
+    if [[ -n "${cmd}" ]]; then
+      printf '%s\n' "${cmd}"
+    fi
+    pid="$(ps -ww -o ppid= -p "${pid}" 2>/dev/null | awk '{print $1}' || true)"
+    i=$((i + 1))
+  done
+  return 0
+}
+
+if [[ -n "${DONEKO_ANCESTORS+x}" ]]; then
+  ANCESTORS_VAL="${DONEKO_ANCESTORS}"
+else
+  ANCESTORS_VAL="$(collect_ancestors || true)"
+fi
 
 CWD="$(pwd -P 2>/dev/null || pwd)"
 EXPLICIT_SOURCE=""
@@ -110,6 +139,7 @@ export DK_TERM_SESSION_ID="${TERM_SESSION_ID_VAL}"
 export DK_ITERM_SESSION_ID="${ITERM_SESSION_ID_VAL}"
 export DK_GHOSTTY_SURFACE_ID="${GHOSTTY_SURFACE_ID_VAL}"
 export DK_TTY="${TTY_VAL}"
+export DK_ANCESTORS="${ANCESTORS_VAL}"
 export DK_PPID="${PPID_VAL}"
 
 EVENT_JSON="$(/usr/bin/python3 - <<'PY' || true
@@ -215,6 +245,57 @@ def looks_like_antigravity(p):
     return False
 
 
+def transcript_host(path):
+    """Host implied by the transcript directory, or None.
+
+    Official data dirs are path components, not substrings:
+    ~/.gemini/antigravity-ide, antigravity-cli, then antigravity (the app).
+    """
+    if not path:
+        return None
+    expanded = os.path.expanduser(str(path))
+    parts = [p for p in expanded.replace("\\", "/").split("/") if p]
+    if "antigravity-ide" in parts:
+        return "antigravity-ide"
+    if "antigravity-cli" in parts:
+        return "terminal"
+    if "antigravity" in parts:
+        return "antigravity-app"
+    return None
+
+
+def ancestry_host(text):
+    """GUI client named by a parent process, or None.
+
+    IDE is checked first: its bundle id contains the app bundle id as a prefix.
+    """
+    if not text:
+        return None
+    if "Antigravity IDE.app" in text or "com.google.antigravity-ide" in text:
+        return "antigravity-ide"
+    if "Antigravity.app" in text or re.search(r"com\.google\.antigravity(?!-ide)\b", text):
+        return "antigravity-app"
+    return None
+
+
+def classify_antigravity_host(transcript_path, ancestors, term_program, tty):
+    """Prefer confirmed GUI ancestry and the transcript host over inherited terminal env."""
+    gui = ancestry_host(ancestors)
+    if gui:
+        return gui
+    hinted = transcript_host(transcript_path)
+    if hinted:
+        return hinted
+    known = {
+        "Apple_Terminal", "iTerm.app", "ghostty", "WarpTerminal",
+        "vscode", "cursor", "Hyper", "Alacritty", "kitty", "WezTerm",
+    }
+    if tty or (term_program in known):
+        return "terminal"
+    return "unknown"
+
+
+transcript_path = ""
 if isinstance(payload, dict) and payload.get("type") == "agent-turn-complete":
     source = "codex"
     kind = kind_explicit or "completed"
@@ -223,6 +304,9 @@ if isinstance(payload, dict) and payload.get("type") == "agent-turn-complete":
     session = str(payload.get("thread-id") or payload.get("turn-id") or "")
 elif source == "antigravity" or looks_like_antigravity(payload):
     source = "antigravity"
+    if isinstance(payload, dict):
+        raw_transcript = payload.get("transcriptPath") or ""
+        transcript_path = raw_transcript if isinstance(raw_transcript, str) else ""
     workspaces = payload.get("workspacePaths") if isinstance(payload, dict) else None
     if isinstance(workspaces, list) and workspaces:
         first = workspaces[0]
@@ -301,6 +385,17 @@ except Exception:
     pass
 
 term_program = os.environ.get("DK_TERM_PROGRAM") or None
+tty_norm = normalize_tty(os.environ.get("DK_TTY") or None)
+if source == "antigravity":
+    host = classify_antigravity_host(
+        transcript_path,
+        os.environ.get("DK_ANCESTORS") or "",
+        term_program,
+        tty_norm,
+    )
+else:
+    # Claude / Codex keep the existing terminal jump, including its fallback.
+    host = "terminal"
 mapping = {
     "Apple_Terminal": "com.apple.Terminal",
     "iTerm.app": "com.googlecode.iterm2",
@@ -328,9 +423,10 @@ event = {
         "termSessionID": os.environ.get("DK_TERM_SESSION_ID") or None,
         "itermSessionID": os.environ.get("DK_ITERM_SESSION_ID") or None,
         "ghosttySurfaceID": ghostty_surface,
-        "tty": normalize_tty(os.environ.get("DK_TTY") or None),
+        "tty": tty_norm,
         "parentPID": ppid,
         "bundleID": bundle,
+        "host": host,
     },
     "unread": True,
 }

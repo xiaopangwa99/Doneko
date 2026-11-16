@@ -6,7 +6,8 @@ import AppKit
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationService()
 
-    private let categoryID = "DONEKO_COMPLETE"
+    private let terminalCategoryID = "DONEKO_COMPLETE"
+    private let appCategoryID = "DONEKO_OPEN_APP"
     private let jumpActionID = "JUMP"
 
     func configure() {
@@ -18,13 +19,24 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             title: "跳回终端",
             options: [.foreground]
         )
-        let category = UNNotificationCategory(
-            identifier: categoryID,
+        let openApp = UNNotificationAction(
+            identifier: jumpActionID,
+            title: "打开 Antigravity",
+            options: [.foreground]
+        )
+        let terminalCategory = UNNotificationCategory(
+            identifier: terminalCategoryID,
             actions: [jump],
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([category])
+        let appCategory = UNNotificationCategory(
+            identifier: appCategoryID,
+            actions: [openApp],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([terminalCategory, appCategory])
 
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if let error {
@@ -46,10 +58,17 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         content.subtitle = event.projectName
-        content.body = event.preview.isEmpty ? "点击跳回对应终端" : event.preview
+        let host = event.terminal.host
+        if event.preview.isEmpty {
+            content.body = host.applicationBundleID == nil ? "点击跳回对应终端" : "点击打开 Antigravity"
+        } else {
+            content.body = event.preview
+        }
         // Bundle may not contain system sounds; use default banner sound + NSSound.
         content.sound = .default
-        content.categoryIdentifier = categoryID
+        content.categoryIdentifier = host.applicationBundleID == nil
+            ? terminalCategoryID
+            : appCategoryID
         content.userInfo = [
             "eventID": event.id,
             "cwd": event.cwd,
@@ -58,7 +77,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             "termSessionID": event.terminal.termSessionID ?? "",
             "itermSessionID": event.terminal.itermSessionID ?? "",
             "ghosttySurfaceID": event.terminal.ghosttySurfaceID ?? "",
-            "bundleID": event.terminal.bundleID ?? ""
+            "bundleID": event.terminal.bundleID ?? "",
+            "host": host.rawValue
         ]
 
         let request = UNNotificationRequest(
@@ -94,6 +114,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     ) {
         let info = response.notification.request.content.userInfo
         Task { @MainActor in
+            let hostRaw = (info["host"] as? String) ?? ""
             let terminal = TerminalInfo(
                 termProgram: info["termProgram"] as? String,
                 termSessionID: info["termSessionID"] as? String,
@@ -101,7 +122,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
                 ghosttySurfaceID: info["ghosttySurfaceID"] as? String,
                 tty: info["tty"] as? String,
                 parentPID: nil,
-                bundleID: info["bundleID"] as? String
+                bundleID: info["bundleID"] as? String,
+                host: OriginHost(rawValue: hostRaw) ?? .unknown
             )
             if let id = info["eventID"] as? String {
                 CompletionStore.shared.markRead(id)

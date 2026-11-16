@@ -157,7 +157,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(statusItem)
         menu.addItem(.separator())
 
-        if store.completions.isEmpty {
+        let working = store.workingSessions.values.sorted { $0.timestamp > $1.timestamp }
+        if !working.isEmpty {
+            for event in working.prefix(8) {
+                let title = "▶ \(event.source.displayName) · \(event.projectName) · 工作中"
+                let item = NSMenuItem(
+                    title: title,
+                    action: #selector(openCompletion(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = event.id
+                item.toolTip = event.preview
+                item.attributedTitle = Self.menuTitle(head: title, summary: event.preview)
+                menu.addItem(item)
+            }
+        }
+
+        if store.completions.isEmpty && working.isEmpty {
             let empty = NSMenuItem(title: "暂无最近完成记录", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
@@ -204,9 +221,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openCompletion(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String,
-              let event = CompletionStore.shared.completions.first(where: { $0.id == id }) else { return }
-        CompletionStore.shared.markRead(id)
+        guard let id = sender.representedObject as? String else { return }
+        let store = CompletionStore.shared
+        let event = store.completions.first(where: { $0.id == id })
+            ?? store.workingSessions.values.first(where: { $0.id == id })
+        guard let event else { return }
+        store.markRead(id)
         TerminalJumper.jump(to: event.terminal, cwd: event.cwd)
         refresh()
     }
